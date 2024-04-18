@@ -1,5 +1,5 @@
 import axios from "axios";
-import { Node, ClaudeTool, ClaudeRequest, ClaudeResponse } from "./index.js";
+import { Node, ClaudeTool, ClaudeRequest, ClaudeResponse, ClaudeMessage } from "./index.js";
 
 const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
   return {
