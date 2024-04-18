@@ -22,8 +22,8 @@ const nodeToClaudeTool = (node) => {
 }
 
 export default async function assistant(
-  { claudeApiKey, nodes, model, maxTokens, userPrompt, systemPrompt, messageHistory },
-  { logging, execute }
+  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory },
+  { logging, execute, nodes }
 ) {
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";

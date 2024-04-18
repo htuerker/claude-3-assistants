@@ -1,19 +1,7 @@
 [
   {
-    "meta": {
-      "description": "",
-      "name": "Claude Assistant",
-      "icon": {
-        "url": "",
-        "type": "URL"
-      },
-      "id": "claude-assistant-node"
-    },
-    "integrations": [],
-    "label": "Claude Assistant",
-    "type": "script",
-    "name": "Claude Assistant",
-    "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.meta.id as the name of the tool. Spaces are not allowed.\n    name: node.meta.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => ({\n          ...properties, [name]: {\n            type: value.type,\n            enum: value.enum,\n            description: value.description\n          }\n        }), {}),\n      required: node.inputs.required ?? [],\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory },\n  { logging, execute, nodes }\n) {\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? []\n  \n  const initialMessages = [\n    ...(messageHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": systemPrompt || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let response = await client.post(\"/messages\", request);\n\n    do {\n      if (response.status !== 200) {\n        throw response;\n      }\n      let result = response.data;\n      const content = result.content;\n\n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        request.messages.push({\n          role: \"assistant\",\n          content\n        });\n\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            throw new Error(`Unknown tool: ${toolUse.name}`);\n          }\n          const output = await execute(node.label, toolUse.input);\n          request.messages.push({\n            role: \"user\",\n            content: [{\n              type: \"tool_result\",\n              tool_use_id: toolUse.id,\n              content: output\n            }]\n          });\n        }\n      }\n\n      response = await client.post(\"/messages\", request);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n    return {\n      data: {\n        ...response.data, messageHistory: [...request.messages, { role: \"assistant\", content: response.data.content }]\n      }\n    }\n  } catch (error) {\n    logging.log(\"error\", error);\n    return { error }\n  }\n}",
+    "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => ({\n          ...properties, [name]: {\n            type: value.type,\n            enum: value.enum,\n            description: value.description\n          }\n        }), {}),\n      required: node.inputs.required ?? [],\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, nodes, model, maxTokens, userPrompt, systemPrompt, messageHistory },\n  { logging, execute }\n) {\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? []\n\n  const initialMessages = [\n    ...(messageHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": systemPrompt || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let response = await client.post(\"/messages\", request);\n\n    do {\n      if (response.status !== 200) {\n        if (response.data.type === \"error\") {\n          throw response.data.error;\n        }\n        throw response;\n      }\n      let result = response.data;\n      const content = result.content;\n\n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        request.messages.push({\n          role: \"assistant\",\n          content\n        });\n\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            throw new Error(`Unknown tool: ${toolUse}`);\n          }\n          request.messages.push({\n            role: \"user\",\n            content: [{\n              type: \"tool_result\",\n              tool_use_id: toolUse.id,\n              content: await execute(node.label, toolUse.input)\n            }]\n          });\n        }\n      }\n\n      response = await client.post(\"/messages\", request);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n    return {\n      data: {\n        ...response.data, messageHistory: [...request.messages, { role: \"assistant\", content: response.data.content }]\n      }\n    }\n  } catch (error) {\n    logging.log(\"error\", error);\n    return { error }\n  }\n}",
+    "subType": "assistant",
     "output": {
       "type": "object",
       "buildship": {
@@ -21,75 +9,52 @@
       },
       "properties": {
         "data": {
-          "title": "Data",
-          "description": "",
+          "type": "object",
+          "buildship": {
+            "index": 0
+          },
           "properties": {
-            "type": {
-              "buildship": {
-                "index": 1
-              },
-              "title": "Type",
-              "description": "",
-              "type": "string"
-            },
-            "usage": {
-              "buildship": {
-                "index": 5
-              },
-              "description": "",
-              "properties": {
-                "output_tokens": {
-                  "buildship": {
-                    "index": 1
-                  },
-                  "type": "number",
-                  "title": "Output Tokens",
-                  "description": ""
-                },
-                "input_tokens": {
-                  "title": "Input Tokens",
-                  "description": "",
-                  "buildship": {
-                    "index": 0
-                  },
-                  "type": "number"
-                }
-              },
-              "type": "object",
-              "title": "Usage"
-            },
-            "stop_sequence": {
-              "title": "Stop Sequence",
-              "type": "array",
-              "buildship": {
-                "index": 4
-              },
-              "description": ""
-            },
             "model": {
-              "title": "Model",
+              "description": "",
               "type": "string",
               "buildship": {
                 "index": 3
               },
+              "title": "Model"
+            },
+            "usage": {
+              "title": "Usage",
+              "type": "object",
+              "buildship": {
+                "index": 5
+              },
+              "properties": {
+                "input_tokens": {
+                  "description": "",
+                  "type": "number",
+                  "buildship": {
+                    "index": 0
+                  },
+                  "title": "Input Tokens"
+                },
+                "output_tokens": {
+                  "type": "number",
+                  "description": "",
+                  "buildship": {
+                    "index": 1
+                  },
+                  "title": "Output Tokens"
+                }
+              },
               "description": ""
             },
-            "content": {
-              "title": "Content",
-              "type": "array",
-              "properties": {},
-              "description": "",
-              "buildship": {
-                "index": 6
-              }
-            },
             "messageHistory": {
-              "description": "",
+              "type": "array",
+              "title": "Message History",
               "buildship": {
                 "index": 8
               },
-              "type": "array",
-              "title": "Message History"
+              "description": ""
             },
             "stop_reason": {
               "type": "string",
@@ -99,93 +64,101 @@
               },
               "description": ""
             },
+            "content": {
+              "buildship": {
+                "index": 6
+              },
+              "type": "array",
+              "properties": {},
+              "title": "Content",
+              "description": ""
+            },
+            "stop_sequence": {
+              "type": "array",
+              "buildship": {
+                "index": 4
+              },
+              "title": "Stop Sequence",
+              "description": ""
+            },
             "role": {
               "type": "string",
-              "description": "",
               "title": "Role",
+              "description": "",
               "buildship": {
                 "index": 2
               }
             },
             "id": {
-              "type": "string",
               "description": "",
               "buildship": {
                 "index": 0
               },
+              "type": "string",
               "title": "Id"
+            },
+            "type": {
+              "title": "Type",
+              "type": "string",
+              "description": "",
+              "buildship": {
+                "index": 1
+              }
             }
           },
-          "type": "object",
-          "buildship": {
-            "index": 0
-          }
+          "description": "",
+          "title": "Data"
         }
       }
     },
-    "id": "c34b21fe-9e2f-4a7e-9917-8d2ddf0cc1be",
-    "subType": "assistant",
+    "name": "Claude Assistant",
+    "onFail": null,
+    "nodes": [],
+    "dependencies": {
+      "axios": "0.28.1"
+    },
+    "label": "Claude Assistant",
+    "meta": {
+      "description": "",
+      "icon": {
+        "type": "URL",
+        "url": ""
+      },
+      "name": "Claude Assistant",
+      "id": "claude-assistant-node"
+    },
+    "type": "script",
+    "integrations": [],
+    "id": "a80a86a6-ee20-4fda-b7b4-60300c19d762",
     "inputs": {
       "type": "object",
-      "required": [
-        "claudeApiKey",
-        "model",
-        "maxTokens",
-        "userPrompt"
-      ],
       "properties": {
         "messageHistory": {
-          "title": "Message History",
-          "description": "",
-          "default": [],
           "pattern": "",
+          "default": [],
           "type": "array",
+          "description": "",
           "buildship": {
-            "index": 5,
-            "sensitive": false
-          }
+            "sensitive": false,
+            "index": 5
+          },
+          "title": "Message History"
         },
         "claudeApiKey": {
-          "buildship": {
-            "index": 0,
-            "sensitive": true
-          },
-          "title": "Claude API Key",
-          "type": "string",
+          "description": "The OpenAI API key to use for authentication.",
           "pattern": "",
-          "description": "The OpenAI API key to use for authentication."
-        },
-        "userPrompt": {
-          "buildship": {
-            "index": 4,
-            "sensitive": false
-          },
           "type": "string",
-          "title": "User Prompt",
-          "default": "",
-          "description": "",
-          "pattern": ""
-        },
-        "maxTokens": {
-          "pattern": "",
           "buildship": {
-            "index": 1,
-            "sensitive": false
+            "sensitive": true,
+            "index": 0
           },
-          "title": "Max Tokens",
-          "default": "",
-          "description": "",
-          "type": "number"
+          "title": "Claude API Key"
         },
         "model": {
-          "title": "Model",
-          "description": "",
-          "type": "string",
-          "enum": [
-            "claude-3-opus-20240229"
-          ],
           "pattern": "",
           "default": "claude-3-opus-20240229",
+          "description": "",
+          "enum": ["claude-3-opus-20240229"],
           "buildship": {
             "index": 1,
             "options": [
@@ -195,33 +168,53 @@
               }
             ],
             "sensitive": false
-          }
-        },
-        "systemPrompt": {
-          "default": "",
-          "description": "",
-          "buildship": {
-            "sensitive": false,
-            "index": 2
           },
           "type": "string",
+          "title": "Model"
+        },
+        "maxTokens": {
+          "type": "number",
+          "title": "Max Tokens",
+          "default": "",
+          "buildship": {
+            "sensitive": false,
+            "index": 1
+          },
           "pattern": "",
-          "title": "System Prompt"
+          "description": ""
+        },
+        "systemPrompt": {
+          "pattern": "",
+          "type": "string",
+          "default": "",
+          "title": "System Prompt",
+          "description": "",
+          "buildship": {
+            "index": 2,
+            "sensitive": false
+          }
+        },
+        "userPrompt": {
+          "type": "string",
+          "pattern": "",
+          "buildship": {
+            "index": 4,
+            "sensitive": false
+          },
+          "description": "",
+          "default": "",
+          "title": "User Prompt"
         }
-      }
+      },
+      "required": ["claudeApiKey", "model", "maxTokens", "userPrompt"]
     },
-    "nodes": [],
-    "dependencies": {
-      "axios": "0.28.1"
-    },
-    "onFail": null,
     "values": {
       "messageHistory": {
-        "expression": "[]",
-        "type": "javascript"
+        "type": "javascript",
+        "expression": "[]"
       },
-      "systemPrompt": "",
       "claudeApiKey": "",
+      "systemPrompt": "",
       "model": "claude-3-opus-20240229",
       "userPrompt": "",
       "maxTokens": 1024
