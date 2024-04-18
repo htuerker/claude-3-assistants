@@ -22,8 +22,8 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
 }
 
 export default async function assistant(
-  { claudeApiKey, nodes, model, maxTokens, userPrompt, systemPrompt, messages }:
-    { claudeApiKey: string, nodes: Node[], model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messages?: ClaudeMessage[] },
+  { claudeApiKey, nodes, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
+    { claudeApiKey: string, nodes: Node[], model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
   { logging, execute }: any
 ) {
   const version = "2023-06-01";
@@ -43,11 +43,13 @@ export default async function assistant(
   const tools = nodes?.map(nodeToClaudeTool) ?? []
 
   const initialMessages = [
-    ...(messages ?? []),
+    ...(messageHistory ?? []),
     {
       "role": "user",
       "content": userPrompt,
     }];
+
+  console.log("initiakMessages", initialMessages);
 
   const baseRequest = {
     "model": model,
@@ -77,6 +79,7 @@ export default async function assistant(
           role: "assistant",
           content
         });
+        console.log(content)
         const toolUses = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {
           const tool = tools.find(tool => tool.name === toolUse.name);

@@ -146,9 +146,11 @@ const main = async () => {
     nodes: testNodes,
     model: "claude-3-opus-20240229",
     maxTokens: 1024,
-    messages: undefined,
+    messageHistory: [
+      { role: "user", content: "What is the current weather in Bursa, Turkey?" },
+      { role: "assistant", content: [{ "type": "text", "text": "Based on the output, the current weather in Bursa, Turkey is 21°C (69.8°F). The temperature is provided in Celsius since a unit was not specified in the function call." }] }],
     systemPrompt: "Respond only in Turkish.",
-    userPrompt: "What is the current weather in Bursa, Turkey?",
+    userPrompt: "What's the weather only in fahrenheit?",
   }, {
     logging,
     execute: async (name: string, input: Record<string, any>) => {
@@ -167,7 +169,10 @@ const main = async () => {
       }
       throw new Error(`Unknown tool: ${name}`);
     }
-  }).then(console.log);
+  }).then((result: any) => {
+    console.log(result);
+    console.log(result.data.content)
+  });
 
 }
 export const readLine = ReadLine.createInterface({ input: process.stdin, output: process.stdout });
