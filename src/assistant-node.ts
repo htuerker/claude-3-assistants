@@ -3,8 +3,8 @@ import { Node, ClaudeTool, ClaudeRequest, ClaudeResponse, ClaudeMessage } from "
 
 const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
   return {
-    // Use node.meta.id as the name of the tool. Spaces are not allowed.
-    name: node.meta.id,
+    // Use node.id as the name of the tool. Spaces are not allowed.
+    name: node.id,
     description: node.meta.description ?? "",
     input_schema: {
       type: "object",

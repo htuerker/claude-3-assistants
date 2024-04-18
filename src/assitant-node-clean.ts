@@ -3,8 +3,8 @@ import axios from "axios";
 
 const nodeToClaudeTool = (node) => {
   return {
-    // Use node.meta.id as the name of the tool. Spaces are not allowed.
-    name: node.meta.id,
+    // Use node.id as the name of the tool. Spaces are not allowed.
+    name: node.id,
     description: node.meta.description ?? "",
     input_schema: {
       type: "object",
@@ -80,7 +80,7 @@ export default async function assistant(
         const toolUses = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {
           const tool = tools.find(tool => tool.name === toolUse.name);
-          const node = nodes?.find(node => node.meta.id === toolUse.name);
+          const node = nodes?.find(node => node.id === toolUse.name);
           if (!tool || !node) {
             throw new Error(`Unknown tool: ${toolUse}`);
           }
@@ -89,7 +89,7 @@ export default async function assistant(
             content: [{
               type: "tool_result",
               tool_use_id: toolUse.id,
-              content: await execute(node.meta.name, toolUse.input)
+              content: await execute(node.label, toolUse.input)
             }]
           });
         }
