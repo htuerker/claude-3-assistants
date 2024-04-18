@@ -143,7 +143,6 @@ const main = async () => {
   }
   await assistant({
     claudeApiKey: process.env.CLAUDE_API_KEY,
-    nodes: testNodes,
     model: "claude-3-opus-20240229",
     maxTokens: 1024,
     messageHistory: [
@@ -153,6 +152,7 @@ const main = async () => {
     userPrompt: "What's the weather only in fahrenheit?",
   }, {
     logging,
+    nodes: testNodes,
     execute: async (name: string, input: Record<string, any>) => {
       const node = testNodes.find(node => node.meta.name === name);
       if (node) {
