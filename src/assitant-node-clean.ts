@@ -1,7 +1,7 @@
+// @ts-nocheck
 import axios from "axios";
-import { Node, ClaudeTool, ClaudeRequest, ClaudeResponse, ClaudeMessage } from "./index.js";
 
-const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
+const nodeToClaudeTool = (node) => {
   return {
     // Use node.meta.id as the name of the tool. Spaces are not allowed.
     name: node.meta.id,
@@ -22,9 +22,8 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
 }
 
 export default async function assistant(
-  { claudeApiKey, nodes, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
-    { claudeApiKey: string, nodes: Node[], model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
-  { logging, execute }: any
+  { claudeApiKey, nodes, model, maxTokens, userPrompt, systemPrompt, messageHistory },
+  { logging, execute }
 ) {
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";
@@ -55,7 +54,7 @@ export default async function assistant(
     "system": systemPrompt || "",
     "tools": tools,
     "messages": initialMessages
-  } as ClaudeRequest;
+  };
 
   try {
     let request = { ...baseRequest };
@@ -68,7 +67,7 @@ export default async function assistant(
         }
         throw response;
       }
-      let result = response.data as ClaudeResponse;
+      let result = response.data;
       const content = result.content;
 
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
@@ -104,6 +103,7 @@ export default async function assistant(
       }
     }
   } catch (error) {
+    logging.log("error", error);
     return { error }
   }
 }

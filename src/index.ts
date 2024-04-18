@@ -3,9 +3,9 @@ import fs from "fs/promises";
 import ReadLine from 'readline/promises';
 import { jsonc } from "jsonc/lib/jsonc"
 
-import assistant from './assistant-node';
-
 import 'dotenv/config';
+
+import assistant from "./assitant-node-clean";
 
 export type Node = {
   meta: {
@@ -172,6 +172,7 @@ const main = async () => {
   }).then((result: any) => {
     console.log(result);
     console.log(result.data.content)
+    console.log(result.data.messageHistory)
   });
 
 }
