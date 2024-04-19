@@ -107,7 +107,7 @@
     // "skipDefaultLibCheck": true,                      /* Skip type checking .d.ts files that are included with TypeScript. */
     "skipLibCheck": true /* Skip type checking all .d.ts files. */
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/assitant-node-clean.js"],
   "exclude": ["node_modules"],
   "watchOptions": {
     // Use native file system events for files and directories

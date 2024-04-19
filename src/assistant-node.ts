@@ -26,7 +26,7 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
 
 export default async function assistant(
   { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
-    { claudeApiKey: string, nodes: Node[], model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
+    { claudeApiKey: string, model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
   { logging, execute, nodes }: { logging: any, execute: any, nodes: Node[] }
 ) {
   const version = "2023-06-01";
@@ -93,7 +93,8 @@ export default async function assistant(
             content: [{
               type: "tool_result",
               tool_use_id: toolUse.id,
-              content: await execute(node.label, toolUse.input)
+              // use empty string as default content
+              content: await execute(node.label, toolUse.input) ?? ""
             }]
           });
         }
@@ -101,12 +102,10 @@ export default async function assistant(
 
       response = await client.post("/messages", request);
     } while (response && response.data && response.data.stop_reason !== "end_turn");
-    return {
-      data: {
-        ...response.data, messageHistory: [...request.messages, { role: "assistant", content: response.data.content }]
-      }
-    }
+    const messageHistory = [...request.messages, { role: "assistant", content: response.data.content }]
+    return { data: { ...response.data, messageHistory } };
   } catch (error) {
+    logging.log(`Error: ${error}`);
     return { error }
   }
 }

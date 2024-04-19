@@ -1,4 +1,3 @@
-// @ts-nocheck
 import axios from "axios";
 
 const nodeToClaudeTool = (node) => {
@@ -92,7 +91,8 @@ export default async function assistant(
             content: [{
               type: "tool_result",
               tool_use_id: toolUse.id,
-              content: await execute(node.label, toolUse.input)
+              // use empty string as default content
+              content: await execute(node.label, toolUse.input) ?? ""
             }]
           });
         }
@@ -100,13 +100,10 @@ export default async function assistant(
 
       response = await client.post("/messages", request);
     } while (response && response.data && response.data.stop_reason !== "end_turn");
-    return {
-      data: {
-        ...response.data, messageHistory: [...request.messages, { role: "assistant", content: response.data.content }]
-      }
-    }
+    const messageHistory = [...request.messages, { role: "assistant", content: response.data.content }]
+    return { data: { ...response.data, messageHistory } };
   } catch (error) {
-    logging.log("error", error);
+    logging.log(`Error: ${error}`);
     return { error }
   }
 }
