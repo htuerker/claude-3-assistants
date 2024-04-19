@@ -254,9 +254,7 @@ const main = async () => {
     claudeApiKey: process.env.CLAUDE_API_KEY,
     model: "claude-3-opus-20240229",
     maxTokens: 1024,
-    messageHistory: [
-      { role: "user", content: "What is the current weather in Bursa, Turkey?" },
-      { role: "assistant", content: [{ "type": "text", "text": "Based on the output, the current weather in Bursa, Turkey is 21°C (69.8°F). The temperature is provided in Celsius since a unit was not specified in the function call." }] }],
+    messageHistory: [],
     systemPrompt: "Respond only in Turkish.",
     userPrompt: "What is the weather like right now in New York? And what's the time in there? Also, log my prompt.",
   }, {

@@ -61,7 +61,6 @@ export default async function assistant(
   try {
     let request = { ...baseRequest };
     let response = await client.post("/messages", request);
-
     do {
       if (response.status !== 200) {
         if (response.data.type === "error") {
@@ -71,14 +70,15 @@ export default async function assistant(
       }
       let result = response.data;
       const content = result.content;
+      request
+      request.messages.push({ role: "assistant", content });
 
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
       if (isToolUse) {
-        request.messages.push({
-          role: "assistant",
-          content
-        });
-
+        const toolUseMessage = {
+          role: "user",
+          content: []
+        };
         const toolUses = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {
           const tool = tools.find(tool => tool.name === toolUse.name);
@@ -86,18 +86,15 @@ export default async function assistant(
           if (!tool || !node) {
             throw new Error(`Unknown tool: ${toolUse}`);
           }
-          request.messages.push({
-            role: "user",
-            content: [{
-              type: "tool_result",
-              tool_use_id: toolUse.id,
-              // use empty string as default content
-              content: await execute(node.label, toolUse.input) ?? ""
-            }]
+          toolUseMessage.content.push({
+            type: "tool_result",
+            tool_use_id: toolUse.id,
+            // use empty string as default content
+            content: await execute(node.label, toolUse.input) ?? ""
           });
         }
+        request.messages.push(toolUseMessage);
       }
-
       response = await client.post("/messages", request);
     } while (response && response.data && response.data.stop_reason !== "end_turn");
     const messageHistory = [...request.messages, { role: "assistant", content: response.data.content }]
