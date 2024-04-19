@@ -85,7 +85,7 @@ export default async function assistant(
 
       let result = response.data as ClaudeResponse;
       const content = result.content;
-      request
+
       request.messages.push({ role: "assistant", content });
 
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
