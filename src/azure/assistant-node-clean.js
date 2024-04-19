@@ -1,11 +1,8 @@
-import { AssistantsClient, ToolDefinition } from "@azure/openai-assistants";
+import { AssistantsClient } from "@azure/openai-assistants";
 import { AzureKeyCredential } from "@azure/openai";
 import { setTimeout } from "timers/promises";
 
-import { Node } from "../types";
-import beautify from 'json-beautify';
-
-const nodeToOpenAiFunction: (node: Node) => ToolDefinition = (node) => {
+const nodeToOpenAiFunction = (node) => {
   return {
     type: "function",
     function: {
@@ -33,21 +30,15 @@ const nodeToOpenAiFunction: (node: Node) => ToolDefinition = (node) => {
   };
 }
 
-const sleep: (ms: number) => Promise<any> = (ms) =>
+const sleep = (ms) =>
   new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));
 
 export default async function assistant(
-  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions }:
-    { azureApiKey: string, resource: string, assistantId: string, threadId: string, userPrompt: string, builtInTools: string[], instructions: any },
-  { req, logging, execute, nodes }:
-    { req: any, logging: any, execute: any, nodes: Node[] }
+  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },
+  { logging, execute, nodes }
 ) {
 
   const tools = nodes?.map(nodeToOpenAiFunction) ?? [];
-
-  console.log("***");
-  console.log("Tools: ", beautify(tools, null as any, 2, 200));
-  console.log("***");
 
   const endpoint = `https://${resource}.openai.azure.com`;
 
@@ -63,10 +54,6 @@ export default async function assistant(
     logging.log("New thread created with ID:", threadId);
   }
 
-  console.log("***");
-  console.log("Create thread: ", beautify(threadId, null as any, 2, 200));
-  console.log("***");
-
   // Retrieval tool isn't supported in Azure yet
   // builtInTools.includes("retrieval") && tools.push({ type: "retrieval" });
   builtInTools.includes("code_interpreter") && tools.push({ type: "code_interpreter" });
@@ -77,14 +64,9 @@ export default async function assistant(
     tools,
   });
 
-
   do {
     await sleep(1000);
     runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);
-
-    console.log("***");
-    console.log("Create run: ", beautify(runResponse, null as any, 2, 200));
-    console.log("***");
 
     const isToolUse = runResponse.status === "requires_action" && runResponse.requiredAction?.type === "submit_tool_outputs";
     if (isToolUse) {

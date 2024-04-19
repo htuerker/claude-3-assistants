@@ -126,7 +126,7 @@ export const testNodes = [
     "script": "export default async ({name},{logging}) => {\nlogging.log(`Hello `)\nreturn new Date().toLocaleString()\n      }",
     "inputs": {
       "type": "object",
-      "required": ["foo"],
+      "required": ["name", "foo"],
       "properties": {
         "foo": {
           "type": "string",
