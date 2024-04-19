@@ -9,13 +9,16 @@ const nodeToClaudeTool = (node) => {
     input_schema: {
       type: "object",
       properties: Object.entries(node.inputs.properties)
-        .reduce((properties, [name, value]) => ({
-          ...properties, [name]: {
-            type: value.type,
-            enum: value.enum,
-            description: value.description
+        .reduce((properties, [name, value]) => {
+          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;
+          return {
+            ...properties, [name]: {
+              type: value.type,
+              enum: value.enum,
+              description: value.description
+            }
           }
-        }), {}),
+        }, {}),
       required: node.inputs.required ?? [],
     },
   };

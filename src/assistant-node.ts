@@ -9,13 +9,16 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
     input_schema: {
       type: "object",
       properties: Object.entries(node.inputs.properties)
-        .reduce((properties, [name, value]) => ({
-          ...properties, [name]: {
-            type: value.type,
-            enum: value.enum,
-            description: value.description
+        .reduce((properties, [name, value]) => {
+          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;
+          return {
+            ...properties, [name]: {
+              type: value.type,
+              enum: value.enum,
+              description: value.description
+            }
           }
-        }), {}),
+        }, {}),
       required: node.inputs.required ?? [],
     },
   };
@@ -24,7 +27,7 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
 export default async function assistant(
   { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
     { claudeApiKey: string, nodes: Node[], model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
-  { logging, execute, nodes }: any
+  { logging, execute, nodes }: { logging: any, execute: any, nodes: Node[] }
 ) {
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";

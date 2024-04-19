@@ -19,6 +19,9 @@ export type Node = {
     required: string[];
     properties: Record<string, {
       description: string;
+      buildship?: {
+        toBeAutoFilled?: boolean;
+      }
       [key: string]: any;
     }>;
   };
