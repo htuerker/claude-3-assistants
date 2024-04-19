@@ -1,6 +1,10 @@
 import axios from "axios";
 
-const nodeToClaudeTool = (node) => {
+import { ClaudeTool, ClaudeRequest, ClaudeResponse, ClaudeMessage, ClaudeToolResultContent } from "./types";
+import { Node } from "../types";
+import beautify from "json-beautify";
+
+const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
   return {
     // Use node.id as the name of the tool. Spaces are not allowed.
     name: node.id,
@@ -24,8 +28,9 @@ const nodeToClaudeTool = (node) => {
 }
 
 export default async function assistant(
-  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory },
-  { logging, execute, nodes }
+  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
+    { claudeApiKey: string, model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
+  { logging, execute, nodes }: { logging: any, execute: any, nodes: Node[] }
 ) {
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";
@@ -41,7 +46,11 @@ export default async function assistant(
     }
   });
 
-  const tools = nodes?.map(nodeToClaudeTool) ?? []
+  const tools = nodes?.map(nodeToClaudeTool) ?? [];
+
+  console.log("***");
+  console.log("Tools:", beautify(tools, null as any, 2, 80));
+  console.log("***");
 
   const initialMessages = [
     ...(messageHistory ?? []),
@@ -56,11 +65,12 @@ export default async function assistant(
     "system": systemPrompt || "",
     "tools": tools,
     "messages": initialMessages
-  };
+  } as ClaudeRequest;
 
   try {
     let request = { ...baseRequest };
     let response = await client.post("/messages", request);
+
     do {
       if (response.status !== 200) {
         if (response.data.type === "error") {
@@ -68,7 +78,12 @@ export default async function assistant(
         }
         throw response;
       }
-      let result = response.data;
+
+      console.log("***");
+      console.log("Response:", beautify(response.data, null as any, 2, 80));
+      console.log("***");
+
+      let result = response.data as ClaudeResponse;
       const content = result.content;
       request
       request.messages.push({ role: "assistant", content });
@@ -76,8 +91,8 @@ export default async function assistant(
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
       if (isToolUse) {
         const toolUseMessage = {
-          role: "user",
-          content: []
+          role: "user" as ClaudeMessage["role"],
+          content: [] as ClaudeToolResultContent[]
         };
         const toolUses = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {

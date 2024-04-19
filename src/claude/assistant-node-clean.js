@@ -1,7 +1,6 @@
 import axios from "axios";
-import { Node, ClaudeTool, ClaudeRequest, ClaudeResponse, ClaudeMessage, ClaudeToolResultContent } from "./index.js";
 
-const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
+const nodeToClaudeTool = (node) => {
   return {
     // Use node.id as the name of the tool. Spaces are not allowed.
     name: node.id,
@@ -25,9 +24,8 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
 }
 
 export default async function assistant(
-  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
-    { claudeApiKey: string, model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
-  { logging, execute, nodes }: { logging: any, execute: any, nodes: Node[] }
+  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory },
+  { logging, execute, nodes }
 ) {
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";
@@ -43,7 +41,7 @@ export default async function assistant(
     }
   });
 
-  const tools = nodes?.map(nodeToClaudeTool) ?? []
+  const tools = nodes?.map(nodeToClaudeTool) ?? [];
 
   const initialMessages = [
     ...(messageHistory ?? []),
@@ -58,11 +56,12 @@ export default async function assistant(
     "system": systemPrompt || "",
     "tools": tools,
     "messages": initialMessages
-  } as ClaudeRequest;
+  };
 
   try {
     let request = { ...baseRequest };
     let response = await client.post("/messages", request);
+
     do {
       if (response.status !== 200) {
         if (response.data.type === "error") {
@@ -70,7 +69,8 @@ export default async function assistant(
         }
         throw response;
       }
-      let result = response.data as ClaudeResponse;
+
+      let result = response.data;
       const content = result.content;
       request
       request.messages.push({ role: "assistant", content });
@@ -78,8 +78,8 @@ export default async function assistant(
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
       if (isToolUse) {
         const toolUseMessage = {
-          role: "user" as ClaudeMessage["role"],
-          content: [] as ClaudeToolResultContent[]
+          role: "user",
+          content: []
         };
         const toolUses = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {
