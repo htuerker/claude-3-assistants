@@ -1,0 +1,46 @@
+{
+  "type": "script",
+  "id": "d656c2a4-06c1-4986-a904-901388a1df2b",
+  "dependencies": {},
+  "meta": {
+    "name": "get_time",
+    "id": "d656c2a4-06c1-4986-a904-901388a1df2b",
+    "description": "Get the current time in a given time zone"
+  },
+  "label": "get_time",
+  "output": {
+    "title": "output",
+    "type": "string",
+    "buildship": {}
+  },
+  "description": "Get the current time in a given time zone",
+  "script": "export default async ({name},{logging}) => {\nlogging.log(`Hello `)\nreturn new Date().toLocaleString()\n      }",
+  "inputs": {
+    "type": "object",
+    "required": ["name", "foo"],
+    "properties": {
+      "foo": {
+        "type": "string",
+        "pattern": "",
+        "buildship": {
+          "sensitive": false,
+          "index": 1
+        },
+        "default": "",
+        "title": "bar",
+        "description": ""
+      },
+      "name": {
+        "description": "The IANA time zone name, e.g. America/Los_Angeles",
+        "type": "string",
+        "title": "timezone",
+        "buildship": {
+          "index": 0,
+          "toBeAutoFilled": true,
+          "sensitive": false
+        }
+      }
+    }
+  },
+  "onFail": null
+}

@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "description": "Logs a message to the console",
+    "icon": {
+      "type": "SVG",
+      "svg": "<path d=\"M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10s10-4.48 10-10S17.52 2 12 2zm0 15c-.55 0-1-.45-1-1v-4c0-.55.45-1 1-1s1 .45 1 1v4c0 .55-.45 1-1 1zm1-8h-2V7h2v2z\"></path>"
+    },
+    "name": "Log Message to Console",
+    "id": "zzzzzzzzzzzzzzzzzzzy"
+  },
+  "dependencies": {},
+  "script": "export default function logMessageToConsole({ message }, { logging }) {\n  logging.log(message);\n}\n",
+  "id": "4b0be9e4-5ec8-4dbe-b57a-57334238daaa",
+  "integrations": [],
+  "type": "script",
+  "output": {
+    "type": "null",
+    "buildship": {},
+    "properties": {}
+  },
+  "label": "Log Message to Console",
+  "inputs": {
+    "type": "object",
+    "required": ["message"],
+    "properties": {
+      "message": {
+        "type": "string",
+        "buildship": {
+          "index": 0,
+          "toBeAutoFilled": true
+        },
+        "title": "Message",
+        "description": "The entire user prompt to log to the console"
+      }
+    }
+  },
+  "onFail": null,
+  "_libRef": {
+    "libType": "public",
+    "integrity": "v3:f876505873e93e2d19ef822e9a7aa1a2",
+    "libNodeRefId": "@buildship/zzzzzzzzzzzzzzzzzzzy",
+    "version": "1.0.0",
+    "src": "https://storage.googleapis.com/buildship-app-us-central1/cache/builtNodes/@buildship/zzzzzzzzzzzzzzzzzzzy/v1_0_0.cjs",
+    "isDirty": true
+  }
+}

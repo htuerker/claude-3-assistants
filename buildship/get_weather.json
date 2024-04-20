@@ -1,0 +1,60 @@
+{
+  "id": "892c8848-c961-45ab-927c-41c57c953bb7",
+  "script": "export default async ({location, unit, notAutoFilled},{logging}) => {\n  console.log(\"notAutoFilled: \", notAutoFilled);\n  if(unit === \"fahrenheit\") {\n    return parseInt(Math.random() * 100) + \" F\";\n  }\n  return parseInt(Math.random() * 40) + \" C\";\n}",
+  "dependencies": {},
+  "name": "get_weather",
+  "label": "get_weather",
+  "description": "Get the current weather in a given location",
+  "meta": {
+    "id": "f5530a02-9a8e-44e8-9b85-88110e6f8aaa",
+    "name": "get_weather",
+    "description": "Get the current weather in a given location"
+  },
+  "type": "script",
+  "inputs": {
+    "properties": {
+      "notAutoFilled": {
+        "buildship": {
+          "sensitive": false,
+          "index": 2
+        },
+        "type": "string",
+        "description": "",
+        "default": "",
+        "title": "notAutoFilled",
+        "pattern": ""
+      },
+      "unit": {
+        "type": "string",
+        "title": "Unit",
+        "default": "",
+        "description": "The unit of temperature, either 'celsius' or 'fahrenheit', use 'celcius' if not specified",
+        "buildship": {
+          "toBeAutoFilled": true,
+          "index": 1,
+          "sensitive": false
+        },
+        "pattern": ""
+      },
+      "location": {
+        "type": "string",
+        "title": "Location",
+        "description": "The city and state, e.g. San Francisco, CA",
+        "pattern": "",
+        "buildship": {
+          "toBeAutoFilled": true,
+          "sensitive": false,
+          "index": 0
+        }
+      }
+    },
+    "required": ["location", "notAutoFilled"],
+    "type": "object"
+  },
+  "output": {
+    "title": "output",
+    "type": "string",
+    "buildship": {}
+  },
+  "onFail": null
+}
