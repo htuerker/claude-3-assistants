@@ -55,7 +55,6 @@ export default async function testClaudeAsisstant({ useProduction = false }: { u
     builtInTools,
     instructions
   }, {
-    req: {},
     logging,
     nodes,
     execute,

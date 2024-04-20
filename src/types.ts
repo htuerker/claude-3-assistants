@@ -1,5 +1,6 @@
 
 export type Node = {
+  label: string;
   meta: {
     id: string;
     description: string;

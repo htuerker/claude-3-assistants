@@ -37,11 +37,9 @@ export default async function assistant(
   { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },
   { logging, execute, nodes }
 ) {
-
   const tools = nodes?.map(nodeToOpenAiFunction) ?? [];
 
   const endpoint = `https://${resource}.openai.azure.com`;
-
   const credentials = new AzureKeyCredential(azureApiKey);
   const assistantsClient = new AssistantsClient(endpoint, credentials);
 
@@ -76,16 +74,16 @@ export default async function assistant(
         let args;
         try {
           args = JSON.parse(toolUse.function.arguments);
+          logging.log(args);
         } catch (err) {
           logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);
           throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)
         }
         const node = nodes?.find(node => node.id === toolUse.function.name);
         if (!node) {
-          throw new Error(`Unknown tool: ${toolUse}`);
+          throw new Error(`Unknown tool: ${toolUse.function.name}`);
         }
-        logging.log(`Executing ${node.meta.name} with args: ${args}`);
-        const toolOutput = await execute(node.meta.name, args);
+        const toolOutput = await execute(node.label, args);
 
         logging.log(toolOutput);
         toolOutputs.push({
@@ -93,7 +91,7 @@ export default async function assistant(
           output: toolOutput ? JSON.stringify(toolOutput) : ""
         });
         logging.log(
-          `Executed ${node.meta.name} with output:`,
+          `Executed ${node.label} with output:`,
           toolOutput
         );
       }
