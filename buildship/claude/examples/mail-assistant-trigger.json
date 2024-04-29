@@ -1,0 +1,571 @@
+{
+  "nodes": [
+    {
+      "meta": {
+        "icon": {
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e",
+          "type": "URL"
+        },
+        "name": "Claude Assistant",
+        "id": "claude-assistant-node",
+        "description": ""
+      },
+      "subType": "assistant",
+      "inputs": {
+        "properties": {
+          "model": {
+            "description": "",
+            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+            "default": "claude-3-opus-20240229",
+            "buildship": {
+              "index": 4,
+              "options": [
+                { "label": "Claude 3 Opus", "value": "claude-3-opus-20240229" },
+                { "label": "Claude 3 Sonnet", "value": "claude-3-sonnet-20240229" },
+                { "value": "claude-3-haiku-20240307", "label": "Claude 3 Haiku" }
+              ],
+              "sensitive": false
+            },
+            "type": "string",
+            "title": "Model",
+            "pattern": ""
+          },
+          "maxTokens": {
+            "type": "number",
+            "buildship": { "index": 4, "sensitive": false },
+            "default": "",
+            "title": "Max Tokens",
+            "pattern": "",
+            "description": ""
+          },
+          "claudeApiKey": {
+            "type": "string",
+            "description": "The OpenAI API key to use for authentication.",
+            "buildship": { "sensitive": true, "index": 0 },
+            "pattern": "",
+            "title": "API Key"
+          },
+          "instructions": {
+            "description": "",
+            "title": "Instructions",
+            "default": "",
+            "buildship": { "sensitive": false, "index": 1 },
+            "type": "string",
+            "pattern": ""
+          },
+          "userPrompt": {
+            "title": "User Prompt",
+            "type": "string",
+            "description": "",
+            "buildship": { "sensitive": false, "index": 2 },
+            "default": "",
+            "pattern": ""
+          },
+          "chatHistory": {
+            "type": "array",
+            "title": "Chat History",
+            "buildship": { "index": 5, "sensitive": false },
+            "pattern": "",
+            "default": [],
+            "description": ""
+          }
+        },
+        "type": "object",
+        "required": ["maxTokens", "userPrompt", "claudeApiKey", "instructions", "model"]
+      },
+      "onFail": null,
+      "id": "8c2ffc99-f370-4681-99a9-05f087c2a74f",
+      "name": "Claude Assistant",
+      "label": "Claude Assistant",
+      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean)\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },\n  { logging, execute, nodes }\n) {\n  // TODO\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": instructions || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.status !== 200) {\n        throw response.error;\n      }\n      if (response.data.type === \"error\") {\n          throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if(isEndTurn) break;\n      \n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n      \n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessage = {\n          role: \"user\",\n          content: []\n        };\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          const toolResponse = await execute(node.label, toolUse.input);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessage.content.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push(toolUseMessage);\n      }\n\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(\"Error\");\n    logging.log(error.config);\n    logging.log(error.message);\n    return { error: error.message }\n  }\n}",
+      "dependencies": { "axios": "0.28.1" },
+      "type": "script",
+      "integrations": [],
+      "nodes": [
+        {
+          "inputs": {
+            "properties": {
+              "workflowId": {
+                "description": "The ID of the workflow to call. You can get the Workflow ID from the `BuildShip Trigger` config.",
+                "buildship": { "index": 1, "sensitive": false },
+                "pattern": "",
+                "title": "Workflow ID",
+                "default": "",
+                "type": "string"
+              },
+              "projectId": {
+                "description": "**(OPTIONAL)** If you wish to execute a BuildShip Workflow that's not a part of the same project, you'd need to specify the Project ID. You can find the **Project ID** in the BuildShip Project Settings or from the `BuildShip Trigger` config.",
+                "type": "string",
+                "pattern": "",
+                "title": "Project ID",
+                "buildship": { "index": 0, "sensitive": false },
+                "default": ""
+              },
+              "contacts": {
+                "properties": {},
+                "description": "the name ",
+                "pattern": "",
+                "title": "Data",
+                "default": {},
+                "buildship": { "sensitive": false, "index": 2 },
+                "type": "object"
+              },
+              "wait": {
+                "buildship": { "index": 3, "sensitive": false },
+                "pattern": "",
+                "default": "true",
+                "description": "Whether you wish to wait for the triggered workflow to execute.",
+                "type": "boolean",
+                "title": "Await?"
+              }
+            },
+            "type": "object",
+            "required": ["workflowId", "wait"]
+          },
+          "script": "import { GoogleAuth } from 'google-auth-library';\nexport default async function cloudRunServiceRequest({\n    workflowId,\n    data,\n    wait,\n    projectId\n},{logging}) {\n    const auth = new GoogleAuth();\n    const _projectId = projectId || process.env.GCLOUD_PROJECT;\n    const url = `https://${_projectId.split(\"-\")[1]}.buildship.run/executeWorkflow/${workflowId}`\n    const client = await auth.getIdTokenClient(`${_projectId}-${workflowId}`);\n    const headers = await client.getRequestHeaders(url);\n    headers['Content-Type'] = 'application/json';\n    if (wait){\n      const response =  await fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      try {\n          const resData = await response.json();\n          return {\n            \"success\": true,\n            \"response\": resData\n          }\n      }catch(e){\n          return {\n            \"success\": false,\n            \"error\": e\n          }\n      }\n    }\n    else{\n      fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      return {\n        \"success\": true\n      }\n    }\n}",
+          "label": "get contacts",
+          "dependencies": { "google-auth-library": "9.4.1" },
+          "onFail": null,
+          "id": "5b3824d8-b007-4099-9862-efe105407228",
+          "integrations": [],
+          "name": "Get contacts",
+          "meta": {
+            "name": "Get contacts",
+            "id": "execute-workflow",
+            "icon": {
+              "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fbuildship.png?alt=media&token=c5248170-8cb1-4a66-af37-436c7a2aa6b8",
+              "type": "URL"
+            },
+            "description": "get contacts a function to access contacts and return a list of emails"
+          },
+          "output": { "properties": {}, "type": "object", "buildship": {} },
+          "type": "script",
+          "_libRef": {
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/execute-workflow/1.0.3.cjs",
+            "isDirty": true,
+            "libNodeRefId": "@buildship/execute-workflow",
+            "version": "1.0.3",
+            "integrity": "v3:cbbae2c115d7ba0f3baff054c992d171",
+            "libType": "public"
+          }
+        },
+        {
+          "dependencies": { "@sendgrid/mail": "7.7.0" },
+          "type": "script",
+          "_libRef": {
+            "isDirty": true,
+            "version": "1.0.1",
+            "integrity": "v3:4e70e751e73a2d683aba69af8a0d8e30",
+            "libNodeRefId": "@buildship/sendgrid-static-email",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/sendgrid-static-email/1.0.1.cjs",
+            "libType": "public"
+          },
+          "onFail": null,
+          "label": "Send Static email",
+          "meta": {
+            "name": "Send Static email",
+            "icon": {
+              "type": "URL",
+              "url": "https://storage.googleapis.com/buildship-app-us-central1/icons/SendGrid.png"
+            },
+            "description": "Send Static email - Sends an email using the Sendgrid API with tracking (NOTE: The messages sent via SendGrid might end up in spam if you haven't verified your sendgrid account)",
+            "id": "sendgrid-static-email"
+          },
+          "script": "import sgMail from '@sendgrid/mail';\nexport default async function sendEmailWithSendgrid({\n    apiKey,\n    fromAddress,\n    fromName,\n    toAddress,\n    emailMessage,\n    tracking\n}, {\n    logging\n}) {\n    sgMail.setApiKey(apiKey);\n    const msg = {\n        to: toAddress,\n        from: fromAddress,\n        subject: fromName,\n        text: emailMessage,\n        html: emailMessage,\n        trackingSettings: {\n            clickTracking: {\n                enable: tracking\n            },\n            openTracking: {\n                enable: tracking\n            },\n            subscriptionTracking: {\n                enable: tracking\n            }\n        }\n    };\n    try {\n        await sgMail.send(msg);\n        logging.log('Email sent');\n        return \"Email Sent!\";\n    } catch (error) {\n        logging.error(error);\n        return error;\n    }\n}",
+          "name": "Send Static email",
+          "id": "18cfe798-2042-4f89-8eda-eae2ef735b77",
+          "inputs": {
+            "type": "object",
+            "required": ["fromAddress", "fromName", "toAddress", "tracking", "emailMessage", "apiKey"],
+            "properties": {
+              "apiKey": {
+                "description": "Your Sendgrid API Key. (Get your SendGrid API Key from [your Account Dashboard](https://app.sendgrid.com/settings/api_keys).)",
+                "type": "string",
+                "title": "API Key",
+                "buildship": { "sensitive": true, "index": 0 },
+                "pattern": "",
+                "default": ""
+              },
+              "toAddress": {
+                "title": "To Address",
+                "buildship": { "index": 3, "toBeAutoFilled": true },
+                "type": "string",
+                "description": "The email address the email will be sent to"
+              },
+              "fromName": {
+                "description": "The name the email will appear to be sent from",
+                "type": "string",
+                "title": "From Name",
+                "buildship": { "index": 2 }
+              },
+              "tracking": {
+                "type": "boolean",
+                "description": "Whether to enable tracking for this email or not",
+                "buildship": { "index": 5 },
+                "default": false,
+                "title": "Tracking"
+              },
+              "fromAddress": {
+                "buildship": { "index": 1 },
+                "description": "The email address the email will be sent from",
+                "type": "string",
+                "title": "From Address"
+              },
+              "emailMessage": {
+                "description": "The content of the email",
+                "pattern": "",
+                "buildship": { "sensitive": false, "index": 4, "toBeAutoFilled": true },
+                "type": "string",
+                "title": "Email Body",
+                "default": ""
+              }
+            }
+          },
+          "output": { "type": "object", "buildship": {}, "properties": {} },
+          "integrations": []
+        }
+      ],
+      "output": {
+        "properties": {
+          "response": { "title": "Response", "buildship": { "index": 0 }, "type": "string", "description": "" },
+          "data": {
+            "buildship": { "index": 3 },
+            "type": "object",
+            "properties": {},
+            "description": "",
+            "title": "Data"
+          },
+          "chatHistory": { "description": "", "title": "Chat History", "buildship": { "index": 1 }, "type": "array" },
+          "error": { "title": "Error", "description": "", "buildship": { "index": 2 } }
+        },
+        "type": "object",
+        "buildship": { "index": 0 },
+        "description": "",
+        "title": ""
+      }
+    },
+    {
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "inputs": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "cacheMaxAge": {
+            "default": 0,
+            "description": "Set cache duration in seconds",
+            "type": "number",
+            "title": "Cache Time",
+            "buildship": { "index": 2 }
+          },
+          "value": {
+            "description": "The value to return",
+            "default": "",
+            "type": "string",
+            "buildship": { "index": 1 },
+            "title": "Value"
+          },
+          "status": {
+            "title": "Status code",
+            "description": "The HTTP status code to return",
+            "type": "string",
+            "default": "200",
+            "buildship": {
+              "index": 0,
+              "options": [
+                { "value": "200", "label": "OK (200)" },
+                { "label": "Created (201)", "value": "201" },
+                { "value": "202", "label": "Accepted (202)" },
+                { "label": "Redirect (301)", "value": "301" },
+                { "label": "No Content (204)", "value": "204" },
+                { "value": "400", "label": "Bad Request (400)" },
+                { "label": "Unauthorized (401)", "value": "401" },
+                { "label": "Forbidden (403)", "value": "403" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "value": "429", "label": "Too Many Requests (429)" },
+                { "value": "500", "label": "Internal Server Error (500)" }
+              ]
+            },
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"]
+          }
+        }
+      },
+      "response": {
+        "200": {
+          "description": "",
+          "type": "object",
+          "title": "",
+          "buildship": { "index": 0 },
+          "properties": {
+            "error": { "buildship": { "index": 2 }, "title": "Error", "description": "" },
+            "chatHistory": { "title": "Chat History", "type": "array", "buildship": { "index": 1 }, "description": "" },
+            "data": {
+              "description": "",
+              "title": "Data",
+              "properties": {},
+              "type": "object",
+              "buildship": { "index": 3 }
+            },
+            "response": { "title": "Response", "buildship": { "index": 0 }, "description": "", "type": "string" }
+          }
+        }
+      },
+      "label": "Return",
+      "type": "return",
+      "id": "f5473d37-c78e-4bbf-95bb-e40f9ee413ce"
+    }
+  ],
+  "trigger": {
+    "id": "http",
+    "live": true,
+    "script": "",
+    "type": "http",
+    "label": "Rest API Call",
+    "inputs": {
+      "required": ["path", "method"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path of the endpoint",
+          "buildship": { "disableExpression": true, "index": 0 },
+          "title": "Path",
+          "default": "/"
+        },
+        "method": {
+          "title": "Method",
+          "buildship": {
+            "index": 1,
+            "options": [
+              { "value": "GET", "label": "GET" },
+              { "value": "POST", "label": "POST" },
+              { "value": "PUT", "label": "PUT" },
+              { "value": "DELETE", "label": "DELETE" }
+            ]
+          },
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "description": "HTTP method",
+          "default": "GET"
+        }
+      },
+      "type": "object"
+    },
+    "request": {
+      "buildship": {},
+      "description": "",
+      "required": ["body"],
+      "title": "Request",
+      "properties": {
+        "query": {
+          "type": "object",
+          "title": "Query",
+          "description": "Query parameters",
+          "buildship": { "index": 0 }
+        },
+        "body": {
+          "description": "Body of the request",
+          "title": "Body",
+          "buildship": { "index": 2 },
+          "type": "object"
+        },
+        "headers": {
+          "title": "Request Headers",
+          "type": "object",
+          "description": "Headers of the request",
+          "buildship": { "index": 1 }
+        }
+      },
+      "type": "object"
+    },
+    "output": {
+      "title": "Request",
+      "type": "object",
+      "buildship": {},
+      "properties": {
+        "body": {
+          "buildship": { "index": 1 },
+          "description": "Body of the request",
+          "type": "object",
+          "title": "Body"
+        },
+        "query": {
+          "title": "Query parameters",
+          "description": "Query parameters",
+          "buildship": { "index": 0 },
+          "type": "object"
+        },
+        "headers": {
+          "title": "Headers",
+          "description": "Headers of the request",
+          "type": "object",
+          "properties": {
+            "content-type": {
+              "title": "Content-Type",
+              "buildship": { "index": 0 },
+              "description": "Content-Type of the request",
+              "type": "string"
+            },
+            "authorization": {
+              "description": "Authorization header",
+              "title": "Authorization",
+              "buildship": { "index": 1 },
+              "type": "string"
+            }
+          },
+          "buildship": {}
+        }
+      }
+    },
+    "testingSchema": [
+      {
+        "name": "endpointURL",
+        "prefill": "endpointURL",
+        "disabled": true,
+        "label": "Endpoint URL",
+        "type": "shortText"
+      },
+      { "prefill": "apiRequestData", "name": "apiRequestData", "type": "apiRequestData" }
+    ],
+    "meta": {
+      "icon": {},
+      "name": "Rest API Call",
+      "description": "Basic trigger that handles HTTP requests",
+      "id": "http"
+    },
+    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" }
+  },
+  "nodeValues": {
+    "a1d6d576-dde6-4729-8f40-1fe2e44d7fdc": {
+      "projectId": "buildship-7y1dn8",
+      "wait": "true",
+      "contacts": "",
+      "workflowId": "k9bff9upipa4KV8FzF4G"
+    },
+    "test-node-fccd170f-da16-4c8b-b56e-a9c41f7d89bc": { "apiKey": "", "tracking": false, "emailMessage": "" },
+    "test-node-14fd01eb-280d-405b-8f0c-8847d0e6e942": {
+      "userPrompt": "",
+      "maxTokens": 1024,
+      "claudeApiKey": "",
+      "instructions": "",
+      "chatHistory": [],
+      "model": "claude-3-opus-20240229"
+    },
+    "http": { "path": "/claude-mail-assistants", "method": "POST" },
+    "test-node-8c2ffc99-f370-4681-99a9-05f087c2a74f": {
+      "userPrompt": "",
+      "instructions": "",
+      "chatHistory": [],
+      "claudeApiKey": "",
+      "model": "claude-3-opus-20240229",
+      "maxTokens": 1024
+    },
+    "6693781c-31e6-4275-aa59-5114959e1d3b": {
+      "assistantId": "asst_Z9Ivw0ZR8ok1oULCJ8wqO3ie",
+      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant",
+      "apiKey": { "secretName": "openai" },
+      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" }
+    },
+    "229374f0-d631-43c2-8bd4-e33a3061826e": { "contacts": "", "projectId": "", "workflowId": "", "wait": "true" },
+    "b5a3c328-698d-4a50-a414-5ecbc12761f1": {
+      "userPrompt": { "keys": ["request", "query", "prompt"] },
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "maxTokens": 1024,
+      "chatHistory": { "expression": "[]", "type": "javascript" },
+      "model": "claude-3-opus-20240229",
+      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant"
+    },
+    "ce67d65b-834c-4fd2-9f9b-9f8f42545d24": {
+      "data": {},
+      "contacts": "",
+      "wait": "true",
+      "projectId": "",
+      "workflowId": "WoFKj9WZw0x0cWThajOW"
+    },
+    "f5473d37-c78e-4bbf-95bb-e40f9ee413ce": {
+      "status": "200",
+      "cacheMaxAge": 0,
+      "value": { "keys": ["8c2ffc99-f370-4681-99a9-05f087c2a74f"] }
+    },
+    "test-node-a16b0382-dec4-49ab-a34b-7b36ec84c18d": {
+      "contacts": {},
+      "projectId": "buildship-7y1dn8",
+      "wait": "true",
+      "workflowId": "k9bff9upipa4KV8FzF4G"
+    },
+    "a16b0382-dec4-49ab-a34b-7b36ec84c18d": {
+      "contacts": "",
+      "wait": "true",
+      "projectId": "buildship-7y1dn8",
+      "workflowId": "k9bff9upipa4KV8FzF4G"
+    },
+    "ba5af4c3-84a0-45a0-94d7-d85f9bf4203a": {
+      "value": { "keys": ["8c2ffc99-f370-4681-99a9-05f087c2a74f"] },
+      "status": "200"
+    },
+    "test-node-a1d6d576-dde6-4729-8f40-1fe2e44d7fdc": {
+      "projectId": "",
+      "contacts": {},
+      "workflowId": "",
+      "wait": "true"
+    },
+    "f2df1abf-5276-40a6-ae69-1defbfe010c4": { "tracking": false, "apiKey": "", "emailMessage": "" },
+    "test-node-f2df1abf-5276-40a6-ae69-1defbfe010c4": { "emailMessage": "", "apiKey": "", "tracking": false },
+    "8c2ffc99-f370-4681-99a9-05f087c2a74f": {
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant",
+      "model": "claude-3-haiku-20240307",
+      "maxTokens": 1024,
+      "userPrompt": {
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
+        "type": "javascript",
+        "hasErrors": false
+      },
+      "chatHistory": {
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].chatHistory",
+        "type": "javascript",
+        "hasErrors": false
+      }
+    },
+    "test-node-960e2c2c-e575-43a8-acc3-584ba43b56d8": {
+      "chatHistory": [],
+      "model": "claude-3-opus-20240229",
+      "userPrompt": "",
+      "maxTokens": 1024,
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant"
+    },
+    "ca452013-0ad8-4568-9498-eedd65ace4c6": { "emailMessage": "", "apiKey": "", "tracking": false },
+    "e39f327d-8cb5-4ce5-b8b6-73e45bd8f569": { "apiKey": "", "emailMessage": "", "tracking": false },
+    "5b3824d8-b007-4099-9862-efe105407228": {
+      "contacts": "",
+      "wait": "true",
+      "projectId": "buildship-7y1dn8",
+      "workflowId": "k9bff9upipa4KV8FzF4G"
+    },
+    "1474e769-944f-401d-a962-8bf9f7d8f53f": {
+      "contacts": "",
+      "projectId": "buildship-7y1dn8",
+      "wait": "true",
+      "workflowId": "k9bff9upipa4KV8FzF4G"
+    },
+    "fccd170f-da16-4c8b-b56e-a9c41f7d89bc": { "apiKey": "", "tracking": false, "emailMessage": "" },
+    "98082231-1cf2-4b8f-94f3-ded9dde174f8": { "tracking": false, "emailMessage": "", "apiKey": "" },
+    "960e2c2c-e575-43a8-acc3-584ba43b56d8": {
+      "model": "claude-3-haiku-20240307",
+      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant",
+      "maxTokens": 1024,
+      "chatHistory": { "type": "javascript", "expression": "[]" },
+      "userPrompt": { "keys": ["request", "query", "prompt"] },
+      "claudeApiKey": { "secretName": "claude-harini" }
+    },
+    "14fd01eb-280d-405b-8f0c-8847d0e6e942": {
+      "claudeApiKey": "",
+      "maxTokens": 1024,
+      "instructions": "",
+      "chatHistory": { "expression": "[]", "type": "javascript" },
+      "userPrompt": "",
+      "model": "claude-3-opus-20240229"
+    },
+    "18cfe798-2042-4f89-8eda-eae2ef735b77": { "emailMessage": "", "apiKey": "", "tracking": false }
+  },
+  "notes": "<p>Use Assistants to read your databases and send emails.</p><p><br></p><p>Learn more on how to create this Assistant on: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-viii-email-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">https://docs.buildship.com/ai-models/assistant#use-case-viii-email-assistant</a></p><p><br></p><p>Find more use cases at <a href=\"https://docs.buildship.com/ai-models/assistant\" rel=\"noopener noreferrer\" target=\"_blank\">https://docs.buildship.com/ai-models/assistant</a></p>"
+}
