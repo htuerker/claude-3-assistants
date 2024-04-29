@@ -1,0 +1,384 @@
+{
+  "nodes": [
+    {
+      "inputs": {
+        "properties": {
+          "threadId": {
+            "description": "The ID of the conversation thread to use. If not specified, a new thread will be created.",
+            "buildship": { "index": 4 },
+            "type": "string",
+            "title": "Thread ID"
+          },
+          "resource": {
+            "title": "Resource",
+            "type": "string",
+            "buildship": { "index": 2, "sensitive": false },
+            "description": "The name of your Azure resource.",
+            "pattern": ""
+          },
+          "azureApiKey": {
+            "title": "Azure API key",
+            "buildship": { "sensitive": false, "index": 0 },
+            "description": "The Azure API key to use for authentication.",
+            "type": "string",
+            "pattern": ""
+          },
+          "builtInTools": {
+            "buildship": {
+              "options": [
+                { "label": "Document Retrieval", "value": "retrieval" },
+                { "label": "Code Interpreter", "value": "code_interpreter" }
+              ],
+              "index": 6
+            },
+            "type": "array",
+            "enum": ["retrieval", "code_interpreter"],
+            "title": "Built-in Tools",
+            "description": "Select the OpenAI assistant built-in tools to use."
+          },
+          "instructions": {
+            "description": "Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis.",
+            "type": "string",
+            "buildship": { "index": 5 },
+            "title": "Instructions"
+          },
+          "userPrompt": {
+            "type": "string",
+            "pattern": "",
+            "default": "",
+            "buildship": { "sensitive": false, "index": 6 },
+            "title": "User prompt",
+            "description": "The prompt to send to the assistant as user message.\n"
+          },
+          "assistantId": {
+            "buildship": { "sensitive": false, "index": 1 },
+            "description": "The ID of the assistant to use. You need to create the assistant in the Azure OpenAI Studio.",
+            "title": "Assistant ID",
+            "type": "string",
+            "pattern": ""
+          }
+        },
+        "required": ["userPrompt", "resource", "assistantId", "azureApiKey"],
+        "type": "object"
+      },
+      "subType": "assistant",
+      "type": "script",
+      "name": "Azure OpenAI Assistant",
+      "id": "ecb74a77-a7cc-4b82-8037-8ba32c03aaaa",
+      "nodes": [
+        {
+          "_libRef": {
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/publicLib/nodes/@buildship/buildship-firestore-collection-query/1.0.2/build.cjs",
+            "isDirty": true,
+            "libType": "public",
+            "integrity": "v3:44572885b08be8ac99f1f10eea882c16",
+            "libNodeRefId": "@buildship/buildship-firestore-collection-query",
+            "version": "1.0.2"
+          },
+          "label": "access menu",
+          "script": "import { Firestore } from '@google-cloud/firestore';\n\nexport default async function firestoreQueryDocuments(\n  {\n    collection\n  },\n) {\n  const firestore = new Firestore(undefined);\n\n  let query = firestore.collection(collection);\n\n\n  let snapshot = await query.limit(100).get();\n  return snapshot.docs.map(doc => ({\n    id: doc.id,\n    data: doc.data()\n  }));\n}\n",
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "collection": {
+                "description": "The name of the BuildShip collection",
+                "type": "string",
+                "title": "Collection Name",
+                "buildship": { "index": 0 }
+              }
+            },
+            "required": ["collection", "filters"]
+          },
+          "meta": {
+            "description": "get the list of dishes from restaurant menu ",
+            "icon": {
+              "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2FIcon.png?alt=media&token=878ed11b-1cf2-45d8-9951-7e95a16d26af&_gl=1*1ld9l67*_ga*NzgyMDk5NjMxLjE2OTY4NzE3ODU.*_ga_CW55HF8NVT*MTY5NjkyMzc5OC4yLjEuMTY5NjkyMzgzMy4yNS4wLjA.",
+              "type": "URL"
+            },
+            "name": "access menu",
+            "id": "buildship-firestore-collection-query"
+          },
+          "type": "script",
+          "id": "75956d62-90c9-4a0a-974b-e9caf1389a60",
+          "integrations": [],
+          "dependencies": { "@google-cloud/firestore": "7.1.0" },
+          "onFail": null,
+          "description": "get the list of dishes from restaurant menu ",
+          "output": {
+            "type": "array",
+            "buildship": {},
+            "title": "Documents",
+            "properties": {
+              "data": { "buildship": { "index": 0 }, "title": "Document Data", "type": "object" },
+              "id": { "type": "string", "title": "Document ID", "buildship": { "index": 1 } }
+            },
+            "description": "The array of documents that match the query"
+          },
+          "name": "access menu"
+        }
+      ],
+      "output": {
+        "type": "object",
+        "buildship": { "index": 0 },
+        "description": "",
+        "title": "Assistant Response",
+        "properties": {
+          "messages": {
+            "buildship": { "index": 0 },
+            "description": "The content of the message in array of text and/or images.",
+            "title": "Messages",
+            "type": "array"
+          },
+          "response": { "type": "string", "buildship": { "index": 2 }, "description": "", "title": "Response" },
+          "annotations": {
+            "title": "Annotations",
+            "description": "The annotations of the message",
+            "type": "array",
+            "buildship": { "index": 3 }
+          },
+          "threadId": {
+            "buildship": { "index": 1 },
+            "title": "Thread ID",
+            "description": "The thread ID that this message belongs to.",
+            "type": "string"
+          }
+        }
+      },
+      "meta": {
+        "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input.",
+        "id": "azure-openai-assistant-node",
+        "name": "Azure OpenAI Assistant",
+        "icon": { "type": "URL", "url": "https://www.svgrepo.com/show/448274/azure.svg" }
+      },
+      "label": "Azure OpenAI Assistant",
+      "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input. once it has completed the request, it will return its response as output message. [Full Documentation](https://docs.buildship.com/core-nodes/openai-assistant).",
+      "script": "import { AssistantsClient } from \"@azure/openai-assistants\";\nimport { AzureKeyCredential } from \"@azure/openai\";\nimport { setTimeout } from \"timers/promises\";\n\nconst nodeToOpenAiFunction = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: node.id,\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\nconst sleep = (ms) =>\n  new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));\n\nexport default async function assistant(\n  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },\n  { logging, execute, nodes }\n) {\n  const tools = nodes?.map(nodeToOpenAiFunction) ?? [];\n\n  const endpoint = `https://${resource}.openai.azure.com`;\n  const credentials = new AzureKeyCredential(azureApiKey);\n  const assistantsClient = new AssistantsClient(endpoint, credentials);\n\n  const messages = [{ role: \"user\", content: userPrompt }];\n\n  if (threadId) {\n    await assistantsClient.createMessage(threadId, \"user\", userPrompt);\n  } else {\n    threadId = (await assistantsClient.createThread({ messages })).id;\n    logging.log(\"New thread created with ID:\", threadId);\n  }\n\n  // Retrieval tool isn't supported in Azure yet\n  // builtInTools.includes(\"retrieval\") && tools.push({ type: \"retrieval\" });\n  builtInTools.includes(\"code_interpreter\") && tools.push({ type: \"code_interpreter\" });\n\n  let runResponse = await assistantsClient.createRun(threadId, {\n    assistantId,\n    instructions,\n    tools,\n  });\n\n  do {\n    await sleep(1000);\n    runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);\n\n    const isToolUse = runResponse.status === \"requires_action\" && runResponse.requiredAction?.type === \"submit_tool_outputs\";\n    if (isToolUse) {\n      const toolOutputs = [];\n      const toolUses = runResponse.requiredAction?.submitToolOutputs?.toolCalls || [];\n      for (const toolUse of toolUses) {\n        let args;\n        try {\n          args = JSON.parse(toolUse.function.arguments);\n          logging.log(args);\n        } catch (err) {\n          logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);\n          throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)\n        }\n        const node = nodes?.find(node => node.id === toolUse.function.name);\n        if (!node) {\n          throw new Error(`Unknown tool: ${toolUse.function.name}`);\n        }\n        const toolOutput = await execute(node.label, args);\n\n        logging.log(toolOutput);\n        toolOutputs.push({\n          toolCallId: toolUse.id,\n          output: toolOutput ? JSON.stringify(toolOutput) : \"\"\n        });\n        logging.log(\n          `Executed ${node.label} with output:`,\n          toolOutput\n        );\n      }\n      runResponse = await assistantsClient.submitToolOutputsToRun(runResponse.threadId, runResponse.id, toolOutputs);\n    }\n  } while (runResponse.status === \"queued\" || runResponse.status === \"in_progress\")\n\n  const { data } = await assistantsClient.listMessages(runResponse.threadId, { order: \"desc\" });\n\n  const resultMessage = data[0];\n\n  if (resultMessage.content[0].type === \"text\") {\n    return {\n      \"response\": resultMessage.content[0].text.value,\n      \"annotations\": resultMessage.content[0].text.annotations,\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n\n  if (resultMessage.content[0].type === \"image_file\") {\n    return {\n      \"response\": \"\",\n      \"imageFileId\": resultMessage.content[0].imageFile.fileId,\n      \"annotations\": [],\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n}",
+      "onFail": null
+    },
+    {
+      "inputs": {
+        "properties": {
+          "cacheMaxAge": {
+            "buildship": { "index": 2 },
+            "title": "Cache Time",
+            "type": "number",
+            "default": 0,
+            "description": "Set cache duration in seconds"
+          },
+          "status": {
+            "default": "200",
+            "type": "string",
+            "description": "The HTTP status code to return",
+            "title": "Status code",
+            "buildship": {
+              "options": [
+                { "label": "OK (200)", "value": "200" },
+                { "value": "201", "label": "Created (201)" },
+                { "label": "Accepted (202)", "value": "202" },
+                { "label": "Redirect (301)", "value": "301" },
+                { "label": "No Content (204)", "value": "204" },
+                { "label": "Bad Request (400)", "value": "400" },
+                { "value": "401", "label": "Unauthorized (401)" },
+                { "label": "Forbidden (403)", "value": "403" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "label": "Internal Server Error (500)", "value": "500" }
+              ],
+              "index": 0
+            },
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "500"]
+          },
+          "value": {
+            "type": "string",
+            "description": "The value to return",
+            "title": "Value",
+            "default": "",
+            "buildship": { "index": 1 }
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "id": "259e3e7b-c783-4394-92d9-29072265845e",
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "type": "return",
+      "label": "Return",
+      "response": {
+        "200": {
+          "type": "object",
+          "description": "",
+          "properties": {
+            "response": { "title": "Response", "description": "", "buildship": { "index": 2 }, "type": "string" },
+            "messages": {
+              "buildship": { "index": 0 },
+              "title": "Messages",
+              "type": "array",
+              "description": "The content of the message in array of text and/or images."
+            },
+            "threadId": {
+              "title": "Thread ID",
+              "description": "The thread ID that this message belongs to.",
+              "buildship": { "index": 1 },
+              "type": "string"
+            },
+            "annotations": {
+              "description": "The annotations of the message",
+              "type": "array",
+              "title": "Annotations",
+              "buildship": { "index": 3 }
+            }
+          },
+          "buildship": { "index": 0 },
+          "title": "Assistant Response"
+        }
+      }
+    }
+  ],
+  "trigger": {
+    "meta": {
+      "name": "Rest API Call",
+      "icon": {},
+      "id": "http",
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)"
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["method", "path"],
+      "properties": {
+        "path": {
+          "buildship": { "index": 0, "sensitive": false },
+          "default": "/",
+          "title": "Path",
+          "pattern": "",
+          "type": "string",
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification)."
+        },
+        "method": {
+          "pattern": "",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "buildship": {
+            "sensitive": false,
+            "index": 1,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "label": "POST", "value": "POST" },
+              { "label": "PUT", "value": "PUT" },
+              { "label": "DELETE", "value": "DELETE" }
+            ]
+          },
+          "description": "The HTTP method for the incoming request.",
+          "default": "GET",
+          "type": "string",
+          "title": "Method"
+        }
+      }
+    },
+    "id": "http",
+    "script": "",
+    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" },
+    "type": "http",
+    "dependencies": {},
+    "request": {
+      "properties": {
+        "query": {
+          "type": "object",
+          "title": "Query",
+          "properties": {},
+          "description": "Query parameters",
+          "buildship": {}
+        },
+        "body": { "description": "Body of the request", "buildship": {}, "type": "object", "title": "Body" },
+        "headers": {
+          "description": "Headers of the request",
+          "title": "Request Headers",
+          "properties": {},
+          "buildship": {},
+          "type": "object"
+        }
+      },
+      "description": "",
+      "buildship": {},
+      "type": "object",
+      "required": [],
+      "title": "Request"
+    },
+    "label": "Rest API Call",
+    "output": {
+      "properties": {
+        "query": {
+          "title": "Query parameters",
+          "type": "object",
+          "buildship": { "index": 0 },
+          "description": "Query parameters"
+        },
+        "body": {
+          "title": "Body",
+          "description": "Body of the request",
+          "type": "object",
+          "buildship": { "index": 1 }
+        },
+        "headers": {
+          "properties": {
+            "authorization": {
+              "description": "Authorization header",
+              "type": "string",
+              "buildship": { "index": 1 },
+              "title": "Authorization"
+            },
+            "content-type": {
+              "type": "string",
+              "buildship": { "index": 0 },
+              "title": "Content-Type",
+              "description": "Content-Type of the request"
+            }
+          },
+          "type": "object",
+          "buildship": {},
+          "description": "Headers of the request",
+          "title": "Headers"
+        }
+      },
+      "type": "object",
+      "buildship": {},
+      "title": "Request"
+    },
+    "testingSchema": [
+      {
+        "name": "endpointURL",
+        "label": "Endpoint URL",
+        "disabled": true,
+        "type": "shortText",
+        "prefill": "endpointURL"
+      },
+      { "type": "apiRequestData", "name": "apiRequestData", "prefill": "apiRequestData" }
+    ],
+    "live": true
+  },
+  "nodeValues": {
+    "259e3e7b-c783-4394-92d9-29072265845e": {
+      "value": { "keys": ["ecb74a77-a7cc-4b82-8037-8ba32c03aaaa"] },
+      "cacheMaxAge": 0,
+      "status": "200"
+    },
+    "6e30a224-d42d-4f7f-92a7-dffe22229a8f": {
+      "spreadsheetUrl": "",
+      "ranges": [],
+      "integrations": { "gsheets": "gsheets;;han.tuerker@gmail.com" }
+    },
+    "ecb74a77-a7cc-4b82-8037-8ba32c03aaaa": {
+      "resource": "buildship-ai-test-us2",
+      "instructions": "You are an expert waitress at a fine dining restaurant. You are familiar with all of the dishes on the menu and are able to recommend the best dishes to customers based on their preferences. You also include possible wine pairings and offer up dessert options when needed.When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:- When the user asks for a menu recommendation you must use 'access menu' get the list of dishes from restaurant menu ",
+      "azureApiKey": { "secretName": "azure-han" },
+      "userPrompt": {
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
+        "type": "javascript",
+        "hasErrors": false
+      },
+      "assistantId": "asst_yn1ysD0DbqcEHTnWAKpmhUuB",
+      "threadId": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId" }
+    },
+    "bd3e235f-ac67-4ad1-8732-eebf077221e9": { "collection": "MyMenu" },
+    "http": { "method": "POST", "path": "/azure-menu-recommender" },
+    "75956d62-90c9-4a0a-974b-e9caf1389a60": { "collection": "MyMenu" }
+  },
+  "notes": "<p>An assistant that gives you plans for travel in a city. Try it using this test request body:</p><p><br></p><p>{</p><p>\"message\":\"I want to have a dessert\"</p><p>}</p><p><br></p><p>Short Video: <a href=\"https://www.youtube.com/watch?v=OiQJQMk_2mo\" rel=\"noopener noreferrer\" target=\"_blank\">youtube.com/watch?v=OiQJQMk_2mo</a></p><p>Documentation: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-i-chat-with-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">docs.buildship.com/ai-models/assistant</a></p>"
+}
