@@ -1,0 +1,475 @@
+{
+  "nodes": [
+    {
+      "meta": {
+        "description": "",
+        "icon": {
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e",
+          "type": "URL"
+        },
+        "id": "claude-assistant-node",
+        "name": "Claude Assistant"
+      },
+      "output": {
+        "buildship": { "index": 0 },
+        "properties": {
+          "data": {
+            "description": "",
+            "type": "object",
+            "properties": {},
+            "title": "Data",
+            "buildship": { "index": 3 }
+          },
+          "response": { "buildship": { "index": 0 }, "description": "", "title": "Response", "type": "string" },
+          "chatHistory": { "description": "", "title": "Chat History", "buildship": { "index": 1 }, "type": "array" },
+          "error": { "buildship": { "index": 2 }, "description": "", "title": "Error" }
+        },
+        "description": "",
+        "type": "object",
+        "title": ""
+      },
+      "id": "ed77dfe5-628b-4905-96dc-b87d86bd68e8",
+      "label": "Claude Assistant",
+      "type": "script",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "chatHistory": {
+            "title": "Chat History",
+            "buildship": { "index": 5, "sensitive": false },
+            "type": "array",
+            "description": "",
+            "pattern": "",
+            "default": []
+          },
+          "instructions": {
+            "buildship": { "sensitive": false, "index": 1 },
+            "default": "",
+            "title": "Instructions",
+            "pattern": "",
+            "description": "",
+            "type": "string"
+          },
+          "claudeApiKey": {
+            "title": "API Key",
+            "description": "The OpenAI API key to use for authentication.",
+            "buildship": { "sensitive": true, "index": 0 },
+            "type": "string",
+            "pattern": ""
+          },
+          "model": {
+            "type": "string",
+            "description": "",
+            "pattern": "",
+            "title": "Model",
+            "default": "claude-3-opus-20240229",
+            "buildship": {
+              "sensitive": false,
+              "options": [
+                { "label": "Claude 3 Opus", "value": "claude-3-opus-20240229" },
+                { "value": "claude-3-sonnet-20240229", "label": "Claude 3 Sonnet" },
+                { "label": "Claude 3 Haiku", "value": "claude-3-haiku-20240307" }
+              ],
+              "index": 4
+            },
+            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+          },
+          "maxTokens": {
+            "title": "Max Tokens",
+            "default": "",
+            "description": "",
+            "pattern": "",
+            "buildship": { "sensitive": false, "index": 4 },
+            "type": "number"
+          },
+          "userPrompt": {
+            "default": "",
+            "type": "string",
+            "title": "User Prompt",
+            "description": "",
+            "buildship": { "index": 2, "sensitive": false },
+            "pattern": ""
+          }
+        },
+        "required": ["maxTokens", "userPrompt", "claudeApiKey", "instructions", "model"]
+      },
+      "dependencies": { "axios": "0.28.1" },
+      "onFail": null,
+      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean)\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },\n  { logging, execute, nodes }\n) {\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": instructions || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.status !== 200) {\n        throw response.error;\n      }\n      if (response.data.type === \"error\") {\n          throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if(isEndTurn) break;\n      \n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n      \n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessage = {\n          role: \"user\",\n          content: []\n        };\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          const toolResponse = await execute(node.label, toolUse.input);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessage.content.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push(toolUseMessage);\n      }\n\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(\"Error\");\n    logging.log(error.config);\n    logging.log(error.message);\n    return { error: error.message }\n  }\n}",
+      "subType": "assistant",
+      "integrations": [],
+      "name": "Claude Assistant",
+      "nodes": [
+        {
+          "integrations": [],
+          "dependencies": { "cheerio": "1.0.0-rc.12", "axios": "1.6.2" },
+          "_libRef": {
+            "libType": "public",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/scrape-web-url/1.0.0.cjs",
+            "version": "1.0.0",
+            "isDirty": true,
+            "integrity": "v3:83c1c98b54e96bb03b6b641e1f9a3d6c",
+            "libNodeRefId": "@buildship/scrape-web-url"
+          },
+          "meta": {
+            "icon": {
+              "svg": "<path d=\"M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.11-.9-2-2-2H4c-1.11 0-2 .89-2 2v10c0 1.1.89 2 2 2H0v2h24v-2h-4ZM4 16V6h16v10.01L4 16Zm5.0967-6.0469c0-1.027.836-1.864 1.864-1.864 1.027 0 1.864.837 1.864 1.864 0 1.027-.837 1.864-1.864 1.864-1.028 0-1.864-.837-1.864-1.864Zm7.032 4.236-2.482-2.482c.331-.505.527-1.107.527-1.754 0-1.772-1.441-3.213-3.213-3.213s-3.214 1.441-3.214 3.213 1.442 3.214 3.214 3.214c.636 0 1.225-.192 1.724-.511l2.489 2.488.955-.955Z\"></path>",
+              "type": "SVG"
+            },
+            "id": "scrape-web-url",
+            "name": "get website",
+            "description": "Scrape a given web url and return the text content"
+          },
+          "inputs": {
+            "properties": {
+              "url": {
+                "default": "",
+                "title": "URL",
+                "pattern": "",
+                "description": "The url to scrape.",
+                "type": "string",
+                "buildship": { "sensitive": false, "toBeAutoFilled": true, "index": 0 }
+              },
+              "selector": {
+                "type": "string",
+                "default": "body",
+                "pattern": "",
+                "title": "Selector",
+                "buildship": { "sensitive": false, "index": 1 },
+                "description": "A valid HTML selector."
+              }
+            },
+            "required": ["url", "selector"],
+            "type": "object"
+          },
+          "output": { "properties": {}, "type": "object", "buildship": {}, "title": "Scrape Web URL" },
+          "type": "script",
+          "name": "get website",
+          "script": "import axios from \"axios\";\nimport cheerio from \"cheerio\";\n\nexport default async function scrapeUrl({ url, selector }) {\n  const { data } = await axios.get(url);\n\n  const $ = cheerio.load(data);\n\n  $(\"script\").remove();\n\n  const content = $(selector).text().replace(/\\n/g, \"\");\n\n  return { content }\n}",
+          "onFail": null,
+          "id": "5886d899-ef14-4b34-bd25-9a0d39006aeb",
+          "label": "get website"
+        }
+      ]
+    },
+    {
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "response": {
+        "200": {
+          "description": "",
+          "title": "",
+          "buildship": { "index": 0 },
+          "type": "object",
+          "properties": {
+            "data": {
+              "type": "object",
+              "title": "Data",
+              "properties": {},
+              "description": "",
+              "buildship": { "index": 3 }
+            },
+            "chatHistory": { "title": "Chat History", "buildship": { "index": 1 }, "type": "array", "description": "" },
+            "response": { "title": "Response", "buildship": { "index": 0 }, "description": "", "type": "string" },
+            "error": { "description": "", "title": "Error", "buildship": { "index": 2 } }
+          }
+        }
+      },
+      "id": "2341ea2e-546e-4325-bf07-81ed944d91b2",
+      "type": "return",
+      "inputs": {
+        "properties": {
+          "status": {
+            "description": "The HTTP status code to return",
+            "title": "Status code",
+            "buildship": {
+              "options": [
+                { "value": "200", "label": "OK (200)" },
+                { "value": "201", "label": "Created (201)" },
+                { "label": "Accepted (202)", "value": "202" },
+                { "label": "Redirect (301)", "value": "301" },
+                { "label": "No Content (204)", "value": "204" },
+                { "label": "Bad Request (400)", "value": "400" },
+                { "value": "401", "label": "Unauthorized (401)" },
+                { "value": "403", "label": "Forbidden (403)" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "value": "500", "label": "Internal Server Error (500)" }
+              ],
+              "index": 0
+            },
+            "default": "200",
+            "type": "string",
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "500"]
+          },
+          "value": {
+            "default": "",
+            "buildship": { "index": 1 },
+            "description": "The value to return",
+            "type": "string",
+            "title": "Value"
+          },
+          "cacheMaxAge": {
+            "type": "number",
+            "description": "Set cache duration in seconds",
+            "default": 0,
+            "buildship": { "index": 2 },
+            "title": "Cache Time"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "label": "Return"
+    }
+  ],
+  "trigger": {
+    "dependencies": {},
+    "live": true,
+    "request": {
+      "properties": {
+        "query": {
+          "buildship": {},
+          "title": "Query",
+          "properties": {},
+          "type": "object",
+          "description": "Query parameters"
+        },
+        "headers": {
+          "buildship": {},
+          "properties": {},
+          "description": "Headers of the request",
+          "title": "Request Headers",
+          "type": "object"
+        },
+        "body": {
+          "type": "object",
+          "buildship": {},
+          "title": "Body",
+          "properties": {
+            "1707747204621": { "description": "", "title": "sample", "type": "string", "buildship": { "index": 0 } }
+          },
+          "description": "Body of the request"
+        }
+      },
+      "required": [],
+      "type": "object",
+      "title": "Request",
+      "buildship": {}
+    },
+    "testingSchema": [
+      {
+        "prefill": "endpointURL",
+        "disabled": true,
+        "name": "endpointURL",
+        "type": "shortText",
+        "label": "Endpoint URL"
+      },
+      { "prefill": "apiRequestData", "type": "apiRequestData", "name": "apiRequestData" }
+    ],
+    "meta": {
+      "icon": {},
+      "id": "http",
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "name": "Rest API Call"
+    },
+    "inputs": {
+      "properties": {
+        "method": {
+          "pattern": "",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "type": "string",
+          "buildship": {
+            "options": [
+              { "value": "GET", "label": "GET" },
+              { "label": "POST", "value": "POST" },
+              { "value": "PUT", "label": "PUT" },
+              { "label": "DELETE", "value": "DELETE" }
+            ],
+            "sensitive": false,
+            "index": 1
+          },
+          "default": "GET",
+          "title": "Method",
+          "description": "The HTTP method for the incoming request."
+        },
+        "path": {
+          "title": "Path",
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "default": "/",
+          "pattern": "",
+          "buildship": { "sensitive": false, "index": 0 },
+          "type": "string"
+        }
+      },
+      "required": ["method", "path"],
+      "type": "object"
+    },
+    "output": {
+      "buildship": {},
+      "title": "Request",
+      "properties": {
+        "query": {
+          "buildship": { "index": 0 },
+          "type": "object",
+          "title": "Query parameters",
+          "description": "Query parameters"
+        },
+        "headers": {
+          "type": "object",
+          "buildship": {},
+          "properties": {
+            "content-type": {
+              "description": "Content-Type of the request",
+              "buildship": { "index": 0 },
+              "type": "string",
+              "title": "Content-Type"
+            },
+            "authorization": {
+              "description": "Authorization header",
+              "buildship": { "index": 1 },
+              "type": "string",
+              "title": "Authorization"
+            }
+          },
+          "title": "Headers",
+          "description": "Headers of the request"
+        },
+        "body": { "type": "object", "description": "Body of the request", "buildship": { "index": 1 }, "title": "Body" }
+      },
+      "type": "object"
+    },
+    "type": "http",
+    "id": "http",
+    "label": "Rest API Call",
+    "script": "",
+    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" }
+  },
+  "nodeValues": {
+    "5886d899-ef14-4b34-bd25-9a0d39006aeb": { "selector": "body", "url": "" },
+    "1561bd39-c6ee-43a7-ada8-4348ac3cf92a": {
+      "chatHistory": { "type": "javascript", "expression": "[]" },
+      "userPrompt": {
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
+        "hasErrors": false,
+        "type": "javascript"
+      },
+      "model": "claude-3-haiku-20240307",
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "maxTokens": 1024
+    },
+    "57dc7adf-a3bd-4a8b-8662-72c448e1574f": {
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "temperature": 1.5,
+      "userPrompt": {
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
+        "type": "javascript",
+        "hasErrors": false
+      },
+      "maxTokens": 1024,
+      "model": "claude-3-haiku-20240307",
+      "chatHistory": { "expression": "[]", "type": "javascript" },
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information"
+    },
+    "2341ea2e-546e-4325-bf07-81ed944d91b2": {
+      "cacheMaxAge": "",
+      "value": { "keys": ["ed77dfe5-628b-4905-96dc-b87d86bd68e8"] },
+      "status": "200"
+    },
+    "969880ae-441a-43a2-846c-d608cc7e05a3": { "url": "", "selector": "body" },
+    "90d2a3f0-d589-4421-bdce-e011c937143f": { "selector": "body", "url": "" },
+    "7c3074a7-fbba-4847-a407-b44544650062": { "selector": "body", "url": "" },
+    "087c6f71-90a5-4159-bcb2-69b790229943": {
+      "apiKey": { "secretName": "openai" },
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "assistantId": "asst_OadB242bbzmqSmFFmfGH0Fbd",
+      "threadId": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].threadID" },
+      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" }
+    },
+    "60044777-0805-4b11-9242-60e874f4db94": {
+      "model": "claude-3-opus-20240229",
+      "chatHistory": { "expression": "[]", "type": "javascript" },
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "userPrompt": {
+        "hasErrors": false,
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
+        "type": "javascript"
+      },
+      "maxTokens": 1024,
+      "claudeApiKey": { "secretName": "claude-harini" }
+    },
+    "2cfef006-2a6b-4756-9214-a4e13fb33116": { "url": "", "selector": "body" },
+    "test-node-57dc7adf-a3bd-4a8b-8662-72c448e1574f": {
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "new_input-1714365158370": "",
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "chatHistory": [],
+      "maxTokens": 1024,
+      "temperature": 1.5,
+      "userPrompt": "",
+      "model": "claude-3-opus-20240229"
+    },
+    "http": { "method": "POST", "path": "/claude-chat-website" },
+    "ed77dfe5-628b-4905-96dc-b87d86bd68e8": {
+      "model": "claude-3-sonnet-20240229",
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "userPrompt": { "expression": "ctx[\"root\"][\"request\"][\"body\"].message", "type": "javascript" },
+      "chatHistory": { "expression": "ctx[\"root\"][\"request\"][\"body\"].chatHistory", "type": "javascript" },
+      "maxTokens": 1024
+    },
+    "test-node-48146f29-b921-4e8c-972b-22750fd86856": {
+      "model": "claude-3-opus-20240229",
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "instructions": "",
+      "chatHistory": [],
+      "maxTokens": "",
+      "userPrompt": ""
+    },
+    "ec7c58e2-75c3-4878-95ce-39c5f9999454": {
+      "instructions": "",
+      "maxTokens": 1024,
+      "chatHistory": { "type": "javascript", "expression": "[]" },
+      "userPrompt": "",
+      "claudeApiKey": "",
+      "model": "claude-3-opus-20240229"
+    },
+    "e97b5299-ec28-4346-85c3-4ef0c83a85cc": { "selector": "body", "url": "" },
+    "test-node-ec7c58e2-75c3-4878-95ce-39c5f9999454": {
+      "userPrompt": "",
+      "maxTokens": 1024,
+      "chatHistory": [],
+      "instructions": "",
+      "claudeApiKey": "",
+      "model": "claude-3-opus-20240229"
+    },
+    "test-node-60044777-0805-4b11-9242-60e874f4db94": {
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "userPrompt": "",
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "chatHistory": [],
+      "model": "claude-3-opus-20240229",
+      "maxTokens": 1024
+    },
+    "test-node-ed77dfe5-628b-4905-96dc-b87d86bd68e8": {
+      "userPrompt": "",
+      "model": "claude-3-opus-20240229",
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "maxTokens": 1024,
+      "chatHistory": [],
+      "claudeApiKey": { "secretName": "claude-harini" }
+    },
+    "48146f29-b921-4e8c-972b-22750fd86856": {
+      "userPrompt": {
+        "hasErrors": false,
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
+        "type": "javascript"
+      },
+      "instructions": "You are an expert in searching information from different sources. Your goal is to respond user questions and requests using the sourc they provide. You must respond in a concise way and readable way. Please ensure that the information is accurate and up-to-date.   When you are given tools to use, you must use them following the guidelines for each tool. Guidelines: - when user asks for information of an specific website you must use 'get website' to scrape a each given website and return the information",
+      "maxTokens": 1024,
+      "chatHistory": { "expression": "[]", "type": "javascript" },
+      "model": "claude-3-opus-20240229",
+      "claudeApiKey": { "secretName": "claude-harini" }
+    }
+  },
+  "notes": "<p>An assistant that scrape a website and get your Assistant to answer questions about it. Try it using this test request body:</p><p><br></p><p>{\"message\":\"What plans I can do in Barcelona. Use this website to answer: <a href=\"https://www.timeout.com/barcelona/things-to-do/best-things-to-do-in-barcelona%22%7D\" rel=\"noopener noreferrer\" target=\"_blank\">https://www.timeout.com/barcelona/things-to-do/best-things-to-do-in-barcelona\"}</a></p><p><br></p><p>Short Video: <a href=\"https://www.youtube.com/watch?v=OiQJQMk_2mo\" rel=\"noopener noreferrer\" target=\"_blank\">youtube.com/watch?v=OiQJQMk_2mo</a></p><p>Documentation: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-i-chat-with-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">docs.buildship.com/ai-models/assistant</a></p>"
+}
