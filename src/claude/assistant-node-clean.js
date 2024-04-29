@@ -71,7 +71,6 @@ export default async function assistant(
 
     do {
       if (response.status !== 200) {
-        // TODO
         if (response.data.type === "error") {
           throw response.data.error;
         }
@@ -79,10 +78,13 @@ export default async function assistant(
       }
 
       let result = response.data;
+
+      const isEndTurn = result.stop_reason === "end_turn";
+      if(isEndTurn) break;
+      
       const content = result.content;
-
       request.messages.push({ role: "assistant", content });
-
+      
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
       if (isToolUse) {
         const toolUseMessage = {
@@ -102,7 +104,6 @@ export default async function assistant(
           toolUseMessage.content.push({
             type: "tool_result",
             tool_use_id: toolUse.id,
-            // use empty string as default content
             content: toolResponse ? JSON.stringify(toolResponse) : "",
           });
         }
