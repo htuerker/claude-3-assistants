@@ -1,0 +1,394 @@
+{
+  "nodes": [
+    {
+      "label": "Claude Assistant",
+      "type": "script",
+      "inputs": {
+        "properties": {
+          "maxTokens": {
+            "type": "number",
+            "default": "",
+            "title": "Max Tokens",
+            "pattern": "",
+            "description": "",
+            "buildship": { "index": 4, "sensitive": false }
+          },
+          "claudeApiKey": {
+            "type": "string",
+            "pattern": "",
+            "buildship": { "sensitive": true, "index": 0 },
+            "title": "API Key",
+            "description": "The OpenAI API key to use for authentication."
+          },
+          "userPrompt": {
+            "description": "",
+            "pattern": "",
+            "default": "",
+            "type": "string",
+            "title": "User Prompt",
+            "buildship": { "index": 2, "sensitive": false }
+          },
+          "chatHistory": {
+            "default": [],
+            "pattern": "",
+            "title": "Chat History",
+            "description": "",
+            "buildship": { "index": 5, "sensitive": false },
+            "type": "array"
+          },
+          "instructions": {
+            "description": "",
+            "buildship": { "sensitive": false, "index": 1 },
+            "title": "Instructions",
+            "pattern": "",
+            "default": "",
+            "type": "string"
+          },
+          "model": {
+            "default": "claude-3-opus-20240229",
+            "type": "string",
+            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+            "buildship": {
+              "index": 4,
+              "sensitive": false,
+              "options": [
+                { "label": "Claude 3 Opus", "value": "claude-3-opus-20240229" },
+                { "value": "claude-3-sonnet-20240229", "label": "Claude 3 Sonnet" },
+                { "value": "claude-3-haiku-20240307", "label": "Claude 3 Haiku" }
+              ]
+            },
+            "title": "Model",
+            "description": "",
+            "pattern": ""
+          }
+        },
+        "type": "object",
+        "required": ["maxTokens", "userPrompt", "claudeApiKey", "instructions", "model"]
+      },
+      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean)\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },\n  { logging, execute, nodes }\n) {\n  // TODO\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": instructions || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.status !== 200) {\n        throw response.error;\n      }\n      if (response.data.type === \"error\") {\n          throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if(isEndTurn) break;\n      \n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n      \n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessage = {\n          role: \"user\",\n          content: []\n        };\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          const toolResponse = await execute(node.label, toolUse.input);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessage.content.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push(toolUseMessage);\n      }\n\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(\"Error\");\n    logging.log(error.config);\n    logging.log(error.message);\n    return { error: error.message }\n  }\n}",
+      "meta": {
+        "description": "",
+        "icon": {
+          "type": "URL",
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e"
+        },
+        "id": "claude-assistant-node",
+        "name": "Claude Assistant"
+      },
+      "dependencies": { "axios": "0.28.1" },
+      "name": "Claude Assistant",
+      "nodes": [
+        {
+          "label": "access menu",
+          "description": "get the list of dishes from restaurant menu ",
+          "output": {
+            "title": "Documents",
+            "type": "array",
+            "properties": {
+              "id": { "type": "string", "buildship": { "index": 1 }, "title": "Document ID" },
+              "data": { "title": "Document Data", "type": "object", "buildship": { "index": 0 } }
+            },
+            "buildship": {},
+            "description": "The array of documents that match the query"
+          },
+          "dependencies": { "@google-cloud/firestore": "7.1.0" },
+          "onFail": null,
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "collection": {
+                "description": "The name of the BuildShip collection",
+                "title": "Collection Name",
+                "buildship": { "index": 0 },
+                "type": "string"
+              }
+            },
+            "required": ["collection", "filters"]
+          },
+          "name": "access menu",
+          "id": "6d6a4168-1c60-48fe-adc6-122c35ccf85a",
+          "_libRef": {
+            "isDirty": true,
+            "libNodeRefId": "@buildship/buildship-firestore-collection-query",
+            "integrity": "v3:44572885b08be8ac99f1f10eea882c16",
+            "libType": "public",
+            "version": "1.0.2",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/publicLib/nodes/@buildship/buildship-firestore-collection-query/1.0.2/build.cjs"
+          },
+          "script": "import { Firestore } from '@google-cloud/firestore';\n\nexport default async function firestoreQueryDocuments(\n  {\n    collection\n  },\n) {\n  const firestore = new Firestore(undefined);\n\n  let query = firestore.collection(collection);\n\n\n  let snapshot = await query.limit(100).get();\n  return snapshot.docs.map(doc => ({\n    id: doc.id,\n    data: doc.data()\n  }));\n}\n",
+          "integrations": [],
+          "type": "script",
+          "meta": {
+            "icon": {
+              "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2FIcon.png?alt=media&token=878ed11b-1cf2-45d8-9951-7e95a16d26af&_gl=1*1ld9l67*_ga*NzgyMDk5NjMxLjE2OTY4NzE3ODU.*_ga_CW55HF8NVT*MTY5NjkyMzc5OC4yLjEuMTY5NjkyMzgzMy4yNS4wLjA.",
+              "type": "URL"
+            },
+            "description": "get the list of dishes from restaurant menu ",
+            "id": "buildship-firestore-collection-query",
+            "name": "access menu"
+          }
+        }
+      ],
+      "integrations": [],
+      "output": {
+        "properties": {
+          "data": {
+            "title": "Data",
+            "buildship": { "index": 3 },
+            "properties": {},
+            "type": "object",
+            "description": ""
+          },
+          "response": { "description": "", "type": "string", "title": "Response", "buildship": { "index": 0 } },
+          "chatHistory": { "type": "array", "title": "Chat History", "buildship": { "index": 1 }, "description": "" },
+          "error": { "description": "", "buildship": { "index": 2 }, "title": "Error" }
+        },
+        "description": "",
+        "buildship": { "index": 0 },
+        "type": "object",
+        "title": ""
+      },
+      "onFail": null,
+      "id": "2b094e96-ad3f-482b-8fce-2921c1fb8dac",
+      "subType": "assistant"
+    },
+    {
+      "response": {
+        "200": {
+          "type": "object",
+          "description": "",
+          "properties": {
+            "data": {
+              "properties": {},
+              "title": "Data",
+              "type": "object",
+              "buildship": { "index": 3 },
+              "description": ""
+            },
+            "error": { "title": "Error", "buildship": { "index": 2 }, "description": "" },
+            "chatHistory": { "description": "", "buildship": { "index": 1 }, "title": "Chat History", "type": "array" },
+            "response": { "title": "Response", "buildship": { "index": 0 }, "description": "", "type": "string" }
+          },
+          "title": "",
+          "buildship": { "index": 0 }
+        }
+      },
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "inputs": {
+        "required": [],
+        "properties": {
+          "status": {
+            "description": "The HTTP status code to return",
+            "buildship": {
+              "index": 0,
+              "options": [
+                { "value": "200", "label": "OK (200)" },
+                { "value": "201", "label": "Created (201)" },
+                { "label": "Accepted (202)", "value": "202" },
+                { "value": "301", "label": "Redirect (301)" },
+                { "label": "No Content (204)", "value": "204" },
+                { "label": "Bad Request (400)", "value": "400" },
+                { "value": "401", "label": "Unauthorized (401)" },
+                { "value": "403", "label": "Forbidden (403)" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "label": "Internal Server Error (500)", "value": "500" }
+              ]
+            },
+            "type": "string",
+            "title": "Status code",
+            "default": "200",
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "500"]
+          },
+          "value": {
+            "buildship": { "index": 1 },
+            "type": "string",
+            "title": "Value",
+            "description": "The value to return",
+            "default": ""
+          },
+          "cacheMaxAge": {
+            "default": 0,
+            "buildship": { "index": 2 },
+            "title": "Cache Time",
+            "type": "number",
+            "description": "Set cache duration in seconds"
+          }
+        },
+        "type": "object"
+      },
+      "id": "fbfd9734-1263-4653-9497-cfb7407d96fd",
+      "type": "return",
+      "label": "Return"
+    }
+  ],
+  "trigger": {
+    "testingSchema": [
+      {
+        "disabled": true,
+        "label": "Endpoint URL",
+        "type": "shortText",
+        "prefill": "endpointURL",
+        "name": "endpointURL"
+      },
+      { "name": "apiRequestData", "prefill": "apiRequestData", "type": "apiRequestData" }
+    ],
+    "script": "",
+    "live": true,
+    "type": "http",
+    "id": "http",
+    "meta": {
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "name": "Rest API Call",
+      "icon": {},
+      "id": "http"
+    },
+    "dependencies": {},
+    "label": "Rest API Call",
+    "request": {
+      "title": "Request",
+      "type": "object",
+      "description": "",
+      "required": [],
+      "buildship": {},
+      "properties": {
+        "query": {
+          "buildship": {},
+          "properties": {},
+          "title": "Query",
+          "description": "Query parameters",
+          "type": "object"
+        },
+        "headers": {
+          "properties": {},
+          "buildship": {},
+          "description": "Headers of the request",
+          "type": "object",
+          "title": "Request Headers"
+        },
+        "body": {
+          "buildship": {},
+          "description": "Body of the request",
+          "type": "object",
+          "title": "Body"
+        }
+      }
+    },
+    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
+    "output": {
+      "title": "Request",
+      "properties": {
+        "query": {
+          "type": "object",
+          "description": "Query parameters",
+          "buildship": { "index": 0 },
+          "title": "Query parameters"
+        },
+        "headers": {
+          "description": "Headers of the request",
+          "type": "object",
+          "buildship": {},
+          "title": "Headers",
+          "properties": {
+            "authorization": {
+              "type": "string",
+              "description": "Authorization header",
+              "buildship": { "index": 1 },
+              "title": "Authorization"
+            },
+            "content-type": {
+              "description": "Content-Type of the request",
+              "title": "Content-Type",
+              "buildship": { "index": 0 },
+              "type": "string"
+            }
+          }
+        },
+        "body": { "description": "Body of the request", "type": "object", "buildship": { "index": 1 }, "title": "Body" }
+      },
+      "type": "object",
+      "buildship": {}
+    },
+    "inputs": {
+      "type": "object",
+      "required": ["method", "path"],
+      "properties": {
+        "path": {
+          "title": "Path",
+          "buildship": { "index": 0, "sensitive": false },
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "type": "string",
+          "default": "/",
+          "pattern": ""
+        },
+        "method": {
+          "description": "The HTTP method for the incoming request.",
+          "type": "string",
+          "default": "GET",
+          "buildship": {
+            "sensitive": false,
+            "index": 1,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "value": "POST", "label": "POST" },
+              { "label": "PUT", "value": "PUT" },
+              { "label": "DELETE", "value": "DELETE" }
+            ]
+          },
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "title": "Method",
+          "pattern": ""
+        }
+      }
+    }
+  },
+  "nodeValues": {
+    "9f11bf36-d8bf-48cc-bd01-1640b6750db0": { "collection": "MyMenu" },
+    "test-node-9f11bf36-d8bf-48cc-bd01-1640b6750db0": { "collection": "MyMenu" },
+    "2b094e96-ad3f-482b-8fce-2921c1fb8dac": {
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "chatHistory": {
+        "hasErrors": false,
+        "type": "javascript",
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].chatHistory"
+      },
+      "userPrompt": {
+        "hasErrors": false,
+        "type": "javascript",
+        "expression": "ctx[\"root\"][\"request\"][\"body\"].message"
+      },
+      "instructions": "You are an expert waitress at a fine dining restaurant. You are familiar with all of the dishes on the menu and are able to recommend the best dishes to customers based on their preferences. You also include possible wine pairings and offer up dessert options when needed.When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:- When the user asks for a menu recommendation you must use 'access menu' get the list of dishes from restaurant menu ",
+      "model": "claude-3-haiku-20240307",
+      "maxTokens": 1024
+    },
+    "test-node-13d400da-8265-43cc-9353-848e337b4645": {
+      "prompt": "hello",
+      "assistantId": "asst_D25kawDmenlcLke7DY6swj5j",
+      "instructions": "You are an expert waitress at a fine dining restaurant. You are familiar with all of the dishes on the menu and are able to recommend the best dishes to customers based on their preferences. You also include possible wine pairings and offer up dessert options when needed.When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:- When the user asks for a menu recommendation you must use 'access menu' get the list of dishes from restaurant menu ",
+      "apiKey": { "secretName": "han-openai" }
+    },
+    "6d6a4168-1c60-48fe-adc6-122c35ccf85a": { "collection": "MyMenu" },
+    "fbfd9734-1263-4653-9497-cfb7407d96fd": {
+      "value": { "keys": ["2b094e96-ad3f-482b-8fce-2921c1fb8dac"] },
+      "status": "200",
+      "cacheMaxAge": 0
+    },
+    "13d400da-8265-43cc-9353-848e337b4645": {
+      "apiKey": { "secretName": "han-openai" },
+      "instructions": "You are an expert waitress at a fine dining restaurant. You are familiar with all of the dishes on the menu and are able to recommend the best dishes to customers based on their preferences. You also include possible wine pairings and offer up dessert options when needed.When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:- When the user asks for a menu recommendation you must use 'access menu' get the list of dishes from restaurant menu ",
+      "assistantId": "asst_D25kawDmenlcLke7DY6swj5j",
+      "threadId": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId" },
+      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" }
+    },
+    "c4b08562-0f43-43e4-907f-027677766b71": {
+      "model": "claude-3-opus-20240229",
+      "userPrompt": { "keys": ["request", "body", "message"] },
+      "instructions": "You are an expert waitress at a fine dining restaurant. You are familiar with all of the dishes on the menu and are able to recommend the best dishes to customers based on their preferences. You also include possible wine pairings and offer up dessert options when needed.When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:- When the user asks for a menu recommendation you must use 'access menu' get the list of dishes from restaurant menu ",
+      "chatHistory": { "type": "javascript", "expression": "[]" },
+      "claudeApiKey": { "secretName": "claude-harini" },
+      "maxTokens": 1024
+    },
+    "http": { "path": "/claude-menu-recommender", "method": "POST" },
+    "6402269f-271f-4b77-b6fa-9bdd13e87775": { "collection": "MyMenu" }
+  },
+  "notes": "<p>An assistant that gives you plans for travel in a city. Try it using this test request body:</p><p><br></p><p>{</p><p>\"message\":\"I want to have a dessert\"</p><p>}</p><p><br></p><p>Short Video: <a href=\"https://www.youtube.com/watch?v=OiQJQMk_2mo\" rel=\"noopener noreferrer\" target=\"_blank\">youtube.com/watch?v=OiQJQMk_2mo</a></p><p>Documentation: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-i-chat-with-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">docs.buildship.com/ai-models/assistant</a></p>"
+}
