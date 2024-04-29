@@ -71,10 +71,10 @@ export default async function assistant(
 
     do {
       if (response.status !== 200) {
-        if (response.data.type === "error") {
+        throw response.error;
+      }
+      if (response.data.type === "error") {
           throw response.data.error;
-        }
-        throw response;
       }
 
       let result = response.data;
@@ -123,7 +123,9 @@ export default async function assistant(
       error: null,
     }
   } catch (error) {
-    logging.log(`Error: ${error}`);
-    return { error }
+    logging.log("Error");
+    logging.log(error.config);
+    logging.log(error.message);
+    return { error: error.message }
   }
 }
