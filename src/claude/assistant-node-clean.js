@@ -27,7 +27,7 @@ const nodeToClaudeTool = (node) => {
 }
 
 export default async function assistant(
-  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory },
+  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },
   { logging, execute, nodes }
 ) {
   const version = "2023-06-01";
@@ -47,7 +47,7 @@ export default async function assistant(
   const tools = nodes?.map(nodeToClaudeTool) ?? [];
 
   const initialMessages = [
-    ...(messageHistory ?? []),
+    ...(chatHistory ?? []),
     {
       "role": "user",
       "content": userPrompt,
@@ -56,7 +56,7 @@ export default async function assistant(
   const baseRequest = {
     "model": model,
     "max_tokens": maxTokens,
-    "system": systemPrompt || "",
+    "system": instructions || "",
     "tools": tools,
     "messages": initialMessages
   };
