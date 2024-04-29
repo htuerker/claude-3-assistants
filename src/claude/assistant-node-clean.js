@@ -18,7 +18,10 @@ const nodeToClaudeTool = (node) => {
             }
           }
         }, {}),
-      required: node.inputs.required ?? [],
+      required: Object.entries(node.inputs.properties).map(([name, value]) => {
+          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;
+          return false;
+        }).filter(Boolean)
     },
   };
 }
