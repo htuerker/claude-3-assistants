@@ -96,7 +96,10 @@ export default async function assistant(
           const tool = tools.find(tool => tool.name === toolUse.name);
           const node = nodes?.find(node => node.id === toolUse.name);
           if (!tool || !node) {
-            throw new Error(`Unknown tool: ${toolUse}`);
+            logging.log("Failed to find tool:");
+            logging.log(toolUse);
+            logging.log(node);
+            throw new Error("Failed to find tool");
           }
           logging.log("Tool node: ", node.name);
           const toolResponse = await execute(node.label, toolUse.input);
