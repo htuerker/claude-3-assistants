@@ -64,6 +64,7 @@ export default async function assistant(
   try {
     let request = { ...baseRequest };
     let response = await client.post("/messages", request);
+    logging.log(`Claude response(${requestCount}): `, response.data);
 
     do {
       if (response.status !== 200) {
@@ -91,16 +92,23 @@ export default async function assistant(
           if (!tool || !node) {
             throw new Error(`Unknown tool: ${toolUse}`);
           }
+          logging.log("Tool node: ", node.name);
+          const toolResponse = await execute(node.label, toolUse.input);
+          logging.log("Tool response: ", toolResponse);
           toolUseMessage.content.push({
             type: "tool_result",
             tool_use_id: toolUse.id,
             // use empty string as default content
-            content: await execute(node.label, toolUse.input) ?? ""
+            content: toolResponse ? JSON.stringify(toolResponse) : "",
           });
         }
         request.messages.push(toolUseMessage);
       }
+
+      requestCount++;
+      logging.log(`Claude request(${requestCount}):`, request);
       response = await client.post("/messages", request);
+      logging.log(`Claude response(${requestCount}): `, response.data);
     } while (response && response.data && response.data.stop_reason !== "end_turn");
     const messageHistory = [...request.messages, { role: "assistant", content: response.data.content }]
     return { data: { ...response.data, messageHistory } };
