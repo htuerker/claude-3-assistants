@@ -30,6 +30,7 @@ export default async function assistant(
   { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },
   { logging, execute, nodes }
 ) {
+  // TODO
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";
 
@@ -63,11 +64,14 @@ export default async function assistant(
 
   try {
     let request = { ...baseRequest };
+    let requestCount = 1;
+    logging.log(`Claude request(${requestCount}):`, baseRequest);
     let response = await client.post("/messages", request);
     logging.log(`Claude response(${requestCount}): `, response.data);
 
     do {
       if (response.status !== 200) {
+        // TODO
         if (response.data.type === "error") {
           throw response.data.error;
         }
@@ -110,8 +114,13 @@ export default async function assistant(
       response = await client.post("/messages", request);
       logging.log(`Claude response(${requestCount}): `, response.data);
     } while (response && response.data && response.data.stop_reason !== "end_turn");
-    const messageHistory = [...request.messages, { role: "assistant", content: response.data.content }]
-    return { data: { ...response.data, messageHistory } };
+
+    return {
+      response: response.data.content[0].text,
+      chatHistory: [...request.messages, { role: "assistant", content: response.data.content }],
+      data: response.data,
+      error: null,
+    }
   } catch (error) {
     logging.log(`Error: ${error}`);
     return { error }
