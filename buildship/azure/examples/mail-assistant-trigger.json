@@ -1,463 +1,453 @@
 {
   "nodes": [
     {
-      "id": "3cb9b150-27fa-483c-8d14-59ba92b784f0",
-      "subType": "assistant",
-      "onFail": null,
-      "name": "Azure OpenAI Assistant",
-      "meta": {
-        "name": "Azure OpenAI Assistant",
-        "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input.",
-        "id": "azure-openai-assistant-node",
-        "icon": { "url": "https://www.svgrepo.com/show/448274/azure.svg", "type": "URL" }
-      },
-      "nodes": [
-        {
-          "onFail": null,
-          "dependencies": { "google-auth-library": "9.4.1" },
-          "inputs": {
-            "required": ["workflowId", "wait"],
-            "type": "object",
-            "properties": {
-              "projectId": {
-                "type": "string",
-                "title": "Project ID",
-                "buildship": { "sensitive": false, "index": 0 },
-                "pattern": "",
-                "description": "**(OPTIONAL)** If you wish to execute a BuildShip Workflow that's not a part of the same project, you'd need to specify the Project ID. You can find the **Project ID** in the BuildShip Project Settings or from the `BuildShip Trigger` config.",
-                "default": ""
-              },
-              "workflowId": {
-                "default": "",
-                "type": "string",
-                "buildship": { "sensitive": false, "index": 1 },
-                "description": "The ID of the workflow to call. You can get the Workflow ID from the `BuildShip Trigger` config.",
-                "pattern": "",
-                "title": "Workflow ID"
-              },
-              "contacts": {
-                "pattern": "",
-                "default": {},
-                "properties": {},
-                "buildship": { "sensitive": false, "index": 2 },
-                "title": "Data",
-                "type": "object",
-                "description": "the name "
-              },
-              "wait": {
-                "type": "boolean",
-                "description": "Whether you wish to wait for the triggered workflow to execute.",
-                "buildship": { "index": 3, "sensitive": false },
-                "title": "Await?",
-                "default": "true",
-                "pattern": ""
-              }
-            }
-          },
-          "name": "Get contacts",
-          "_libRef": {
-            "isDirty": true,
-            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/execute-workflow/1.0.3.cjs",
-            "libNodeRefId": "@buildship/execute-workflow",
-            "libType": "public",
-            "integrity": "v3:cbbae2c115d7ba0f3baff054c992d171",
-            "version": "1.0.3"
-          },
-          "meta": {
-            "description": "get contacts a function to access contacts and return a list of emails",
-            "id": "execute-workflow",
-            "icon": {
-              "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fbuildship.png?alt=media&token=c5248170-8cb1-4a66-af37-436c7a2aa6b8",
-              "type": "URL"
-            },
-            "name": "Get contacts"
-          },
-          "type": "script",
-          "output": { "properties": {}, "type": "object", "buildship": {} },
-          "script": "import { GoogleAuth } from 'google-auth-library';\nexport default async function cloudRunServiceRequest({\n    workflowId,\n    data,\n    wait,\n    projectId\n},{logging}) {\n    const auth = new GoogleAuth();\n    const _projectId = projectId || process.env.GCLOUD_PROJECT;\n    const url = `https://${_projectId.split(\"-\")[1]}.buildship.run/executeWorkflow/${workflowId}`\n    const client = await auth.getIdTokenClient(`${_projectId}-${workflowId}`);\n    const headers = await client.getRequestHeaders(url);\n    headers['Content-Type'] = 'application/json';\n    if (wait){\n      const response =  await fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      try {\n          const resData = await response.json();\n          return {\n            \"success\": true,\n            \"response\": resData\n          }\n      }catch(e){\n          return {\n            \"success\": false,\n            \"error\": e\n          }\n      }\n    }\n    else{\n      fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      return {\n        \"success\": true\n      }\n    }\n}",
-          "label": "get contacts",
-          "id": "6406b9be-6524-4437-9fd0-7a2ac80399a7",
-          "integrations": []
-        },
-        {
-          "script": "import sgMail from '@sendgrid/mail';\nexport default async function sendEmailWithSendgrid({\n    apiKey,\n    fromAddress,\n    fromName,\n    toAddress,\n    emailMessage,\n    tracking\n}, {\n    logging\n}) {\n    sgMail.setApiKey(apiKey);\n    const msg = {\n        to: toAddress,\n        from: fromAddress,\n        subject: fromName,\n        text: emailMessage,\n        html: emailMessage,\n        trackingSettings: {\n            clickTracking: {\n                enable: tracking\n            },\n            openTracking: {\n                enable: tracking\n            },\n            subscriptionTracking: {\n                enable: tracking\n            }\n        }\n    };\n    try {\n        await sgMail.send(msg);\n        logging.log('Email sent');\n        return \"Email Sent!\";\n    } catch (error) {\n        logging.error(error);\n        return error;\n    }\n}",
-          "type": "script",
-          "id": "c698af45-9ea9-46ce-a9d7-6c8f3fd66880",
-          "integrations": [],
-          "output": { "buildship": {}, "type": "object", "properties": {} },
-          "onFail": null,
-          "_libRef": {
-            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/sendgrid-static-email/1.0.1.cjs",
-            "libNodeRefId": "@buildship/sendgrid-static-email",
-            "version": "1.0.1",
-            "isDirty": true,
-            "libType": "public",
-            "integrity": "v3:4e70e751e73a2d683aba69af8a0d8e30"
-          },
-          "name": "Send Static email",
-          "dependencies": { "@sendgrid/mail": "7.7.0" },
-          "inputs": {
-            "properties": {
-              "fromAddress": {
-                "type": "string",
-                "description": "The email address the email will be sent from",
-                "title": "From Address",
-                "buildship": { "index": 1 }
-              },
-              "tracking": {
-                "default": false,
-                "title": "Tracking",
-                "description": "Whether to enable tracking for this email or not",
-                "type": "boolean",
-                "buildship": { "index": 5 }
-              },
-              "emailMessage": {
-                "pattern": "",
-                "description": "The content of the email",
-                "title": "Email Body",
-                "default": "",
-                "buildship": { "sensitive": false, "toBeAutoFilled": true, "index": 4 },
-                "type": "string"
-              },
-              "apiKey": {
-                "title": "API Key",
-                "description": "Your Sendgrid API Key. (Get your SendGrid API Key from [your Account Dashboard](https://app.sendgrid.com/settings/api_keys).)",
-                "type": "string",
-                "pattern": "",
-                "buildship": { "index": 0, "sensitive": true },
-                "default": ""
-              },
-              "toAddress": {
-                "description": "The email address the email will be sent to",
-                "type": "string",
-                "title": "To Address",
-                "buildship": { "toBeAutoFilled": true, "index": 3 }
-              },
-              "fromName": {
-                "buildship": { "index": 2 },
-                "title": "From Name",
-                "description": "The name the email will appear to be sent from",
-                "type": "string"
-              }
-            },
-            "required": ["fromAddress", "fromName", "toAddress", "tracking", "emailMessage", "apiKey"],
-            "type": "object"
-          },
-          "meta": {
-            "icon": {
-              "url": "https://storage.googleapis.com/buildship-app-us-central1/icons/SendGrid.png",
-              "type": "URL"
-            },
-            "name": "Send Static email",
-            "description": "Send Static email - Sends an email using the Sendgrid API with tracking (NOTE: The messages sent via SendGrid might end up in spam if you haven't verified your sendgrid account)",
-            "id": "sendgrid-static-email"
-          },
-          "label": "Send Static email"
-        }
-      ],
-      "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input. once it has completed the request, it will return its response as output message. [Full Documentation](https://docs.buildship.com/core-nodes/openai-assistant).",
       "label": "Azure OpenAI Assistant",
+      "name": "Azure OpenAI Assistant",
+      "id": "1d349dc8-7210-4a9c-97c3-d20a55d27a64",
       "inputs": {
-        "type": "object",
         "properties": {
-          "instructions": {
-            "description": "Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis.",
+          "userPrompt": {
+            "title": "User prompt",
             "type": "string",
-            "buildship": { "index": 5 },
-            "title": "Instructions"
+            "pattern": "",
+            "description": "The prompt to send to the assistant as user message.\n",
+            "buildship": { "index": 6, "sensitive": false },
+            "default": ""
+          },
+          "builtInTools": {
+            "enum": ["retrieval", "code_interpreter"],
+            "description": "Select the OpenAI assistant built-in tools to use.",
+            "type": "array",
+            "title": "Built-in Tools",
+            "buildship": {
+              "index": 6,
+              "options": [
+                { "label": "Document Retrieval", "value": "retrieval" },
+                { "value": "code_interpreter", "label": "Code Interpreter" }
+              ]
+            }
           },
           "assistantId": {
             "type": "string",
             "buildship": { "index": 1, "sensitive": false },
-            "title": "Assistant ID",
-            "description": "The ID of the assistant to use. You need to create the assistant in the Azure OpenAI Studio.",
-            "pattern": ""
-          },
-          "resource": {
-            "type": "string",
-            "buildship": { "sensitive": false, "index": 2 },
             "pattern": "",
-            "title": "Resource",
-            "description": "The name of your Azure resource."
+            "title": "Assistant ID",
+            "description": "The ID of the assistant to use. You need to create the assistant in the Azure OpenAI Studio."
           },
           "azureApiKey": {
-            "type": "string",
-            "title": "Azure API key",
-            "description": "The Azure API key to use for authentication.",
             "buildship": { "sensitive": false, "index": 0 },
-            "pattern": ""
-          },
-          "userPrompt": {
+            "title": "Azure API key",
+            "type": "string",
             "pattern": "",
-            "default": "",
-            "buildship": { "index": 6, "sensitive": false },
-            "description": "The prompt to send to the assistant as user message.\n",
-            "title": "User prompt",
-            "type": "string"
+            "description": "The Azure API key to use for authentication."
           },
           "threadId": {
             "type": "string",
-            "description": "The ID of the conversation thread to use. If not specified, a new thread will be created.",
+            "buildship": { "index": 4 },
             "title": "Thread ID",
-            "buildship": { "index": 4 }
+            "description": "The ID of the conversation thread to use. If not specified, a new thread will be created."
           },
-          "builtInTools": {
-            "buildship": {
-              "index": 6,
-              "options": [
-                { "value": "retrieval", "label": "Document Retrieval" },
-                { "label": "Code Interpreter", "value": "code_interpreter" }
-              ]
-            },
-            "enum": ["retrieval", "code_interpreter"],
-            "type": "array",
-            "title": "Built-in Tools",
-            "description": "Select the OpenAI assistant built-in tools to use."
+          "resource": {
+            "description": "The name of your Azure resource.",
+            "title": "Resource",
+            "buildship": { "index": 2, "hidden": false, "sensitive": false },
+            "pattern": "",
+            "type": "string"
+          },
+          "instructions": {
+            "description": "Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis.",
+            "title": "Instructions",
+            "type": "string",
+            "buildship": { "index": 5 }
           }
         },
+        "type": "object",
         "required": ["userPrompt", "resource", "assistantId", "azureApiKey"]
       },
+      "script": "import { AssistantsClient } from \"@azure/openai-assistants\";\nimport { AzureKeyCredential } from \"@azure/openai\";\nimport { setTimeout } from \"timers/promises\";\n\nconst nodeToOpenAiFunction = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: node.id,\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\nconst sleep = (ms) =>\n  new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));\n\nexport default async function assistant(\n  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },\n  { logging, execute, nodes }\n) {\n  const tools = nodes?.map(nodeToOpenAiFunction) ?? [];\n\n  const endpoint = `https://${resource}.openai.azure.com`;\n  const credentials = new AzureKeyCredential(azureApiKey);\n  const assistantsClient = new AssistantsClient(endpoint, credentials);\n\n  const messages = [{ role: \"user\", content: userPrompt }];\n\n  if (threadId) {\n    await assistantsClient.createMessage(threadId, \"user\", userPrompt);\n  } else {\n    threadId = (await assistantsClient.createThread({ messages })).id;\n    logging.log(\"New thread created with ID:\", threadId);\n  }\n\n  // Retrieval tool isn't supported in Azure yet\n  // builtInTools.includes(\"retrieval\") && tools.push({ type: \"retrieval\" });\n  builtInTools.includes(\"code_interpreter\") && tools.push({ type: \"code_interpreter\" });\n\n  let runResponse = await assistantsClient.createRun(threadId, {\n    assistantId,\n    instructions,\n    tools,\n  });\n\n  do {\n    await sleep(1000);\n    runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);\n\n    const isToolUse = runResponse.status === \"requires_action\" && runResponse.requiredAction?.type === \"submit_tool_outputs\";\n    if (isToolUse) {\n      const toolOutputs = [];\n      const toolUses = runResponse.requiredAction?.submitToolOutputs?.toolCalls || [];\n      for (const toolUse of toolUses) {\n        let args;\n        try {\n          args = JSON.parse(toolUse.function.arguments);\n          logging.log(args);\n        } catch (err) {\n          logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);\n          throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)\n        }\n        const node = nodes?.find(node => node.id === toolUse.function.name);\n        if (!node) {\n          throw new Error(`Unknown tool: ${toolUse.function.name}`);\n        }\n        const toolOutput = await execute(node.label, args);\n\n        logging.log(toolOutput);\n        toolOutputs.push({\n          toolCallId: toolUse.id,\n          output: toolOutput ? JSON.stringify(toolOutput) : \"\"\n        });\n        logging.log(\n          `Executed ${node.label} with output:`,\n          toolOutput\n        );\n      }\n      runResponse = await assistantsClient.submitToolOutputsToRun(runResponse.threadId, runResponse.id, toolOutputs);\n    }\n  } while (runResponse.status === \"queued\" || runResponse.status === \"in_progress\")\n\n  const { data } = await assistantsClient.listMessages(runResponse.threadId, { order: \"desc\" });\n\n  const resultMessage = data[0];\n\n  if (resultMessage.content[0].type === \"text\") {\n    return {\n      \"response\": resultMessage.content[0].text.value,\n      \"annotations\": resultMessage.content[0].text.annotations,\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n\n  if (resultMessage.content[0].type === \"image_file\") {\n    return {\n      \"response\": \"\",\n      \"imageFileId\": resultMessage.content[0].imageFile.fileId,\n      \"annotations\": [],\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n}",
       "type": "script",
+      "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input. once it has completed the request, it will return its response as output message. [Full Documentation](https://docs.buildship.com/core-nodes/openai-assistant).",
+      "nodes": [
+        {
+          "meta": {
+            "id": "execute-workflow",
+            "description": "get contacts a function to access contacts and return a list of emails",
+            "icon": {
+              "type": "URL",
+              "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fbuildship.png?alt=media&token=c5248170-8cb1-4a66-af37-436c7a2aa6b8"
+            },
+            "name": "Get contacts"
+          },
+          "dependencies": { "google-auth-library": "9.4.1" },
+          "integrations": [],
+          "id": "f008e961-b5f8-4457-8816-7d2598c0d59a",
+          "inputs": {
+            "properties": {
+              "wait": {
+                "type": "boolean",
+                "default": "true",
+                "pattern": "",
+                "description": "Whether you wish to wait for the triggered workflow to execute.",
+                "title": "Await?",
+                "buildship": { "index": 3, "sensitive": false }
+              },
+              "projectId": {
+                "title": "Project ID",
+                "pattern": "",
+                "buildship": { "index": 0, "sensitive": false },
+                "default": "",
+                "description": "**(OPTIONAL)** If you wish to execute a BuildShip Workflow that's not a part of the same project, you'd need to specify the Project ID. You can find the **Project ID** in the BuildShip Project Settings or from the `BuildShip Trigger` config.",
+                "type": "string"
+              },
+              "workflowId": {
+                "pattern": "",
+                "default": "",
+                "buildship": { "index": 1, "sensitive": false },
+                "description": "The ID of the workflow to call. You can get the Workflow ID from the `BuildShip Trigger` config.",
+                "title": "Workflow ID",
+                "type": "string"
+              },
+              "contacts": {
+                "properties": {},
+                "description": "the name ",
+                "default": {},
+                "buildship": { "index": 2, "sensitive": false },
+                "pattern": "",
+                "title": "Data",
+                "type": "object"
+              }
+            },
+            "required": ["workflowId", "wait"],
+            "type": "object"
+          },
+          "script": "import { GoogleAuth } from 'google-auth-library';\nexport default async function cloudRunServiceRequest({\n    workflowId,\n    data,\n    wait,\n    projectId\n},{logging}) {\n    const auth = new GoogleAuth();\n    const _projectId = projectId || process.env.GCLOUD_PROJECT;\n    const url = `https://${_projectId.split(\"-\")[1]}.buildship.run/executeWorkflow/${workflowId}`\n    const client = await auth.getIdTokenClient(`${_projectId}-${workflowId}`);\n    const headers = await client.getRequestHeaders(url);\n    headers['Content-Type'] = 'application/json';\n    if (wait){\n      const response =  await fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      try {\n          const resData = await response.json();\n          return {\n            \"success\": true,\n            \"response\": resData\n          }\n      }catch(e){\n          return {\n            \"success\": false,\n            \"error\": e\n          }\n      }\n    }\n    else{\n      fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      return {\n        \"success\": true\n      }\n    }\n}",
+          "output": { "buildship": {}, "type": "object", "properties": {} },
+          "label": "get contacts",
+          "_libRef": {
+            "libType": "public",
+            "version": "1.0.3",
+            "integrity": "v3:cbbae2c115d7ba0f3baff054c992d171",
+            "isDirty": true,
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/execute-workflow/1.0.3.cjs",
+            "libNodeRefId": "@buildship/execute-workflow"
+          },
+          "type": "script",
+          "name": "Get contacts",
+          "onFail": null
+        },
+        {
+          "dependencies": { "@sendgrid/mail": "7.7.0" },
+          "id": "f1046cad-cc8b-40df-a45b-b571eed25364",
+          "name": "Send Static email",
+          "type": "script",
+          "label": "Send Static email",
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "emailMessage": {
+                "buildship": { "sensitive": false, "toBeAutoFilled": true, "index": 4 },
+                "description": "The content of the email",
+                "pattern": "",
+                "type": "string",
+                "default": "",
+                "title": "Email Body"
+              },
+              "tracking": {
+                "type": "boolean",
+                "default": false,
+                "description": "Whether to enable tracking for this email or not",
+                "buildship": { "index": 5 },
+                "title": "Tracking"
+              },
+              "fromAddress": {
+                "title": "From Address",
+                "type": "string",
+                "description": "The email address the email will be sent from",
+                "buildship": { "index": 1 }
+              },
+              "fromName": {
+                "title": "From Name",
+                "description": "The name the email will appear to be sent from",
+                "buildship": { "index": 2 },
+                "type": "string"
+              },
+              "toAddress": {
+                "type": "string",
+                "buildship": { "toBeAutoFilled": true, "index": 3 },
+                "title": "To Address",
+                "description": "The email address the email will be sent to"
+              },
+              "apiKey": {
+                "default": "",
+                "type": "string",
+                "title": "API Key",
+                "pattern": "",
+                "buildship": { "index": 0, "sensitive": true },
+                "description": "Your Sendgrid API Key. (Get your SendGrid API Key from [your Account Dashboard](https://app.sendgrid.com/settings/api_keys).)"
+              }
+            },
+            "required": ["fromAddress", "fromName", "toAddress", "tracking", "emailMessage", "apiKey"]
+          },
+          "_libRef": {
+            "libType": "public",
+            "version": "1.0.1",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/sendgrid-static-email/1.0.1.cjs",
+            "integrity": "v3:4e70e751e73a2d683aba69af8a0d8e30",
+            "isDirty": true,
+            "libNodeRefId": "@buildship/sendgrid-static-email"
+          },
+          "output": { "type": "object", "buildship": {}, "properties": {} },
+          "integrations": [],
+          "meta": {
+            "name": "Send Static email",
+            "id": "sendgrid-static-email",
+            "icon": {
+              "type": "URL",
+              "url": "https://storage.googleapis.com/buildship-app-us-central1/icons/SendGrid.png"
+            },
+            "description": "Send Static email - Sends an email using the Sendgrid API with tracking (NOTE: The messages sent via SendGrid might end up in spam if you haven't verified your sendgrid account)"
+          },
+          "script": "import sgMail from '@sendgrid/mail';\nexport default async function sendEmailWithSendgrid({\n    apiKey,\n    fromAddress,\n    fromName,\n    toAddress,\n    emailMessage,\n    tracking\n}, {\n    logging\n}) {\n    sgMail.setApiKey(apiKey);\n    const msg = {\n        to: toAddress,\n        from: fromAddress,\n        subject: fromName,\n        text: emailMessage,\n        html: emailMessage,\n        trackingSettings: {\n            clickTracking: {\n                enable: tracking\n            },\n            openTracking: {\n                enable: tracking\n            },\n            subscriptionTracking: {\n                enable: tracking\n            }\n        }\n    };\n    try {\n        await sgMail.send(msg);\n        logging.log('Email sent');\n        return \"Email Sent!\";\n    } catch (error) {\n        logging.error(error);\n        return error;\n    }\n}",
+          "onFail": null
+        }
+      ],
       "output": {
         "properties": {
+          "annotations": {
+            "description": "The annotations of the message",
+            "buildship": { "index": 3 },
+            "title": "Annotations",
+            "type": "array"
+          },
+          "response": { "type": "string", "title": "Response", "buildship": { "index": 2 }, "description": "" },
+          "messages": {
+            "title": "Messages",
+            "buildship": { "index": 0 },
+            "description": "The content of the message in array of text and/or images.",
+            "type": "array"
+          },
           "threadId": {
             "description": "The thread ID that this message belongs to.",
             "buildship": { "index": 1 },
-            "title": "Thread ID",
-            "type": "string"
-          },
-          "annotations": {
-            "type": "array",
-            "title": "Annotations",
-            "description": "The annotations of the message",
-            "buildship": { "index": 3 }
-          },
-          "response": { "buildship": { "index": 2 }, "description": "", "type": "string", "title": "Response" },
-          "messages": {
-            "title": "Messages",
-            "type": "array",
-            "buildship": { "index": 0 },
-            "description": "The content of the message in array of text and/or images."
+            "type": "string",
+            "title": "Thread ID"
           }
         },
+        "description": "",
         "type": "object",
-        "title": "Assistant Response",
         "buildship": { "index": 0 },
-        "description": ""
+        "title": "Assistant Response"
       },
-      "script": "import { AssistantsClient } from \"@azure/openai-assistants\";\nimport { AzureKeyCredential } from \"@azure/openai\";\nimport { setTimeout } from \"timers/promises\";\n\nconst nodeToOpenAiFunction = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: node.id,\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\nconst sleep = (ms) =>\n  new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));\n\nexport default async function assistant(\n  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },\n  { logging, execute, nodes }\n) {\n  const tools = nodes?.map(nodeToOpenAiFunction) ?? [];\n\n  const endpoint = `https://${resource}.openai.azure.com`;\n  const credentials = new AzureKeyCredential(azureApiKey);\n  const assistantsClient = new AssistantsClient(endpoint, credentials);\n\n  const messages = [{ role: \"user\", content: userPrompt }];\n\n  if (threadId) {\n    await assistantsClient.createMessage(threadId, \"user\", userPrompt);\n  } else {\n    threadId = (await assistantsClient.createThread({ messages })).id;\n    logging.log(\"New thread created with ID:\", threadId);\n  }\n\n  // Retrieval tool isn't supported in Azure yet\n  // builtInTools.includes(\"retrieval\") && tools.push({ type: \"retrieval\" });\n  builtInTools.includes(\"code_interpreter\") && tools.push({ type: \"code_interpreter\" });\n\n  let runResponse = await assistantsClient.createRun(threadId, {\n    assistantId,\n    instructions,\n    tools,\n  });\n\n  do {\n    await sleep(1000);\n    runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);\n\n    const isToolUse = runResponse.status === \"requires_action\" && runResponse.requiredAction?.type === \"submit_tool_outputs\";\n    if (isToolUse) {\n      const toolOutputs = [];\n      const toolUses = runResponse.requiredAction?.submitToolOutputs?.toolCalls || [];\n      for (const toolUse of toolUses) {\n        let args;\n        try {\n          args = JSON.parse(toolUse.function.arguments);\n          logging.log(args);\n        } catch (err) {\n          logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);\n          throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)\n        }\n        const node = nodes?.find(node => node.id === toolUse.function.name);\n        if (!node) {\n          throw new Error(`Unknown tool: ${toolUse.function.name}`);\n        }\n        const toolOutput = await execute(node.label, args);\n\n        logging.log(toolOutput);\n        toolOutputs.push({\n          toolCallId: toolUse.id,\n          output: toolOutput ? JSON.stringify(toolOutput) : \"\"\n        });\n        logging.log(\n          `Executed ${node.label} with output:`,\n          toolOutput\n        );\n      }\n      runResponse = await assistantsClient.submitToolOutputsToRun(runResponse.threadId, runResponse.id, toolOutputs);\n    }\n  } while (runResponse.status === \"queued\" || runResponse.status === \"in_progress\")\n\n  const { data } = await assistantsClient.listMessages(runResponse.threadId, { order: \"desc\" });\n\n  const resultMessage = data[0];\n\n  if (resultMessage.content[0].type === \"text\") {\n    return {\n      \"response\": resultMessage.content[0].text.value,\n      \"annotations\": resultMessage.content[0].text.annotations,\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n\n  if (resultMessage.content[0].type === \"image_file\") {\n    return {\n      \"response\": \"\",\n      \"imageFileId\": resultMessage.content[0].imageFile.fileId,\n      \"annotations\": [],\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n}"
+      "onFail": null,
+      "subType": "assistant",
+      "meta": {
+        "name": "Azure OpenAI Assistant",
+        "icon": { "url": "https://www.svgrepo.com/show/448274/azure.svg", "type": "URL" },
+        "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input.",
+        "id": "azure-openai-assistant-node"
+      }
     },
     {
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "response": { "2XX": { "properties": {}, "type": "object" } },
+      "id": "14476515-d197-402b-8ee8-ad62491c2a3d",
+      "label": "Return",
+      "type": "return",
       "inputs": {
+        "required": [],
         "type": "object",
         "properties": {
-          "cacheMaxAge": {
-            "type": "number",
-            "title": "Cache Time",
-            "default": 0,
-            "buildship": { "index": 2 },
-            "description": "Set cache duration in seconds"
+          "value": {
+            "description": "The value to return",
+            "type": "string",
+            "default": "",
+            "title": "Value",
+            "buildship": { "index": 1 }
           },
           "status": {
-            "type": "string",
-            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
+            "title": "Status code",
             "description": "The HTTP status code to return",
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
+            "type": "string",
             "buildship": {
               "options": [
-                { "value": "200", "label": "OK (200)" },
-                { "label": "Created (201)", "value": "201" },
-                { "value": "202", "label": "Accepted (202)" },
+                { "label": "OK (200)", "value": "200" },
+                { "value": "201", "label": "Created (201)" },
+                { "label": "Accepted (202)", "value": "202" },
                 { "label": "Redirect (301)", "value": "301" },
                 { "label": "No Content (204)", "value": "204" },
-                { "label": "Bad Request (400)", "value": "400" },
-                { "label": "Unauthorized (401)", "value": "401" },
-                { "label": "Forbidden (403)", "value": "403" },
-                { "label": "Not Found (404)", "value": "404" },
+                { "value": "400", "label": "Bad Request (400)" },
+                { "value": "401", "label": "Unauthorized (401)" },
+                { "value": "403", "label": "Forbidden (403)" },
+                { "value": "404", "label": "Not Found (404)" },
                 { "label": "Too Many Requests (429)", "value": "429" },
                 { "label": "Internal Server Error (500)", "value": "500" }
               ],
               "index": 0
             },
-            "title": "Status code",
             "default": "200"
           },
-          "value": {
-            "buildship": { "index": 1 },
-            "default": "",
-            "type": "string",
-            "title": "Value",
-            "description": "The value to return"
+          "cacheMaxAge": {
+            "type": "number",
+            "description": "Set cache duration in seconds",
+            "default": 0,
+            "buildship": { "index": 2 },
+            "title": "Cache Time"
           }
-        },
-        "required": []
-      },
-      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
-      "label": "Return",
-      "type": "return",
-      "id": "8b36cc14-4873-4a62-80af-7b68d37d6595",
-      "response": {
-        "200": {
-          "properties": {
-            "annotations": {
-              "type": "array",
-              "title": "Annotations",
-              "buildship": { "index": 3 },
-              "description": "The annotations of the message"
-            },
-            "messages": {
-              "description": "The content of the message in array of text and/or images.",
-              "type": "array",
-              "title": "Messages",
-              "buildship": { "index": 0 }
-            },
-            "response": { "description": "", "buildship": { "index": 2 }, "title": "Response", "type": "string" },
-            "threadId": {
-              "title": "Thread ID",
-              "description": "The thread ID that this message belongs to.",
-              "buildship": { "index": 1 },
-              "type": "string"
-            }
-          },
-          "description": "",
-          "title": "Assistant Response",
-          "buildship": { "index": 0 },
-          "type": "object"
         }
       }
     }
   ],
   "trigger": {
-    "script": "",
-    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
-    "type": "http",
-    "id": "http",
-    "live": true,
-    "inputs": {
-      "properties": {
-        "path": {
-          "buildship": { "index": 0, "disableExpression": true },
-          "type": "string",
-          "description": "Path of the endpoint",
-          "default": "/",
-          "title": "Path"
-        },
-        "method": {
-          "type": "string",
-          "description": "HTTP method",
-          "default": "GET",
-          "buildship": {
-            "index": 1,
-            "options": [
-              { "value": "GET", "label": "GET" },
-              { "label": "POST", "value": "POST" },
-              { "label": "PUT", "value": "PUT" },
-              { "label": "DELETE", "value": "DELETE" }
-            ]
-          },
-          "enum": ["GET", "POST", "PUT", "DELETE"],
-          "title": "Method"
-        }
-      },
-      "type": "object",
-      "required": ["path", "method"]
+    "meta": {
+      "id": "http",
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "icon": {},
+      "name": "Rest API Call"
     },
+    "dependencies": {},
+    "id": "http",
+    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" },
     "testingSchema": [
       {
+        "label": "Endpoint URL",
         "disabled": true,
-        "prefill": "endpointURL",
         "type": "shortText",
-        "name": "endpointURL",
-        "label": "Endpoint URL"
+        "prefill": "endpointURL",
+        "name": "endpointURL"
       },
       { "type": "apiRequestData", "name": "apiRequestData", "prefill": "apiRequestData" }
     ],
-    "meta": {
-      "icon": {},
-      "id": "http",
-      "description": "Basic trigger that handles HTTP requests",
-      "name": "Rest API Call"
-    },
-    "request": {
-      "type": "object",
-      "title": "Request",
-      "properties": {
-        "headers": {
-          "description": "Headers of the request",
-          "type": "object",
-          "buildship": { "index": 1 },
-          "title": "Request Headers"
-        },
-        "query": { "type": "object", "title": "Query", "buildship": { "index": 0 }, "description": "Query parameters" },
-        "body": { "description": "Body of the request", "buildship": { "index": 2 }, "title": "Body", "type": "object" }
-      },
-      "required": ["body"],
-      "buildship": {},
-      "description": ""
-    },
     "output": {
       "buildship": {},
       "type": "object",
-      "title": "Request",
       "properties": {
-        "headers": {
-          "description": "Headers of the request",
-          "properties": {
-            "content-type": {
-              "description": "Content-Type of the request",
-              "title": "Content-Type",
-              "type": "string",
-              "buildship": { "index": 0 }
-            },
-            "authorization": {
-              "title": "Authorization",
-              "buildship": { "index": 1 },
-              "type": "string",
-              "description": "Authorization header"
-            }
-          },
-          "title": "Headers",
-          "buildship": {},
-          "type": "object"
+        "body": {
+          "buildship": { "index": 1 },
+          "type": "object",
+          "title": "Body",
+          "description": "Body of the request"
         },
         "query": {
+          "title": "Query parameters",
           "type": "object",
-          "description": "Query parameters",
           "buildship": { "index": 0 },
-          "title": "Query parameters"
+          "description": "Query parameters"
         },
-        "body": { "type": "object", "buildship": { "index": 1 }, "description": "Body of the request", "title": "Body" }
+        "headers": {
+          "description": "Headers of the request",
+          "title": "Headers",
+          "type": "object",
+          "buildship": {},
+          "properties": {
+            "content-type": {
+              "type": "string",
+              "title": "Content-Type",
+              "buildship": { "index": 0 },
+              "description": "Content-Type of the request"
+            },
+            "authorization": {
+              "description": "Authorization header",
+              "buildship": { "index": 1 },
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        }
+      },
+      "title": "Request"
+    },
+    "live": true,
+    "request": {
+      "properties": {
+        "headers": {
+          "type": "object",
+          "buildship": {},
+          "properties": {},
+          "title": "Request Headers",
+          "description": "Headers of the request"
+        },
+        "query": {
+          "title": "Query",
+          "type": "object",
+          "buildship": {},
+          "description": "Query parameters",
+          "properties": {}
+        },
+        "body": {
+          "buildship": {},
+          "description": "Body of the request",
+          "type": "object",
+          "title": "Body",
+          "properties": {
+            "message": { "title": "Message", "type": "string", "buildship": { "index": 0 }, "description": "" },
+            "threadId": { "type": "string", "buildship": { "index": 1 }, "title": "Thread Id", "description": "" }
+          }
+        }
+      },
+      "title": "Request",
+      "buildship": {},
+      "type": "object",
+      "required": []
+    },
+    "label": "Rest API Call",
+    "type": "http",
+    "groupId": null,
+    "inputs": {
+      "required": ["method", "path"],
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "type": "string",
+          "pattern": "",
+          "title": "Path",
+          "default": "/",
+          "buildship": { "index": 0, "sensitive": false }
+        },
+        "method": {
+          "buildship": {
+            "sensitive": false,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "label": "POST", "value": "POST" },
+              { "value": "PUT", "label": "PUT" },
+              { "label": "DELETE", "value": "DELETE" }
+            ],
+            "index": 1
+          },
+          "default": "GET",
+          "type": "string",
+          "description": "The HTTP method for the incoming request.",
+          "title": "Method",
+          "pattern": "",
+          "enum": ["GET", "POST", "PUT", "DELETE"]
+        }
       }
     },
-    "label": "Rest API Call"
+    "order": 1,
+    "script": ""
   },
   "nodeValues": {
-    "3cb9b150-27fa-483c-8d14-59ba92b784f0": {
-      "azureApiKey": { "secretName": "azure-han" },
-      "resource": "buildship-ai-test-us2",
-      "threadId": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId" },
-      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant",
-      "userPrompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" },
-      "assistantId": "asst_yn1ysD0DbqcEHTnWAKpmhUuB"
-    },
-    "6406b9be-6524-4437-9fd0-7a2ac80399a7": {
-      "contacts": "",
-      "projectId": "buildship-7y1dn8",
-      "wait": "true",
-      "workflowId": "k9bff9upipa4KV8FzF4G"
-    },
-    "http": { "method": "POST", "path": "/azure-mail-assistants" },
-    "8b36cc14-4873-4a62-80af-7b68d37d6595": {
-      "value": { "keys": ["3cb9b150-27fa-483c-8d14-59ba92b784f0"] },
+    "14476515-d197-402b-8ee8-ad62491c2a3d": {
       "status": "200",
-      "cacheMaxAge": 0
+      "cacheMaxAge": 0,
+      "value": {
+        "type": "javascript",
+        "expression": "{\n  \"message\": ctx[\"root\"][\"1d349dc8-7210-4a9c-97c3-d20a55d27a64\"][\"response\"],\n  \"threadId\": ctx[\"root\"][\"1d349dc8-7210-4a9c-97c3-d20a55d27a64\"][\"threadId\"]\n}"
+      }
     },
-    "c698af45-9ea9-46ce-a9d7-6c8f3fd66880": { "tracking": false, "emailMessage": "", "apiKey": "" },
-    "318f5c7d-3dd6-4c6d-a7d5-4fd3e37edbfb": {
-      "wait": "true",
-      "projectId": "buildship-7y1dn8",
-      "contacts": "",
-      "workflowId": "k9bff9upipa4KV8FzF4G"
-    }
+    "http": { "path": "/azure-mail-assistant", "method": "POST" },
+    "1d349dc8-7210-4a9c-97c3-d20a55d27a64": {
+      "userPrompt": { "keys": ["request", "body", "message"] },
+      "resource": "",
+      "azureApiKey": "",
+      "assistantId": "",
+      "threadId": { "keys": ["request", "body", "threadId"] },
+      "instructions": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant"
+    },
+    "f008e961-b5f8-4457-8816-7d2598c0d59a": { "workflowId": "", "projectId": "", "wait": "true", "contacts": "" },
+    "f1046cad-cc8b-40df-a45b-b571eed25364": { "emailMessage": "", "tracking": false, "apiKey": "" }
   },
   "notes": "<p>Use Assistants to read your databases and send emails.</p><p><br></p><p>Learn more on how to create this Assistant on: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-viii-email-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">https://docs.buildship.com/ai-models/assistant#use-case-viii-email-assistant</a></p><p><br></p><p>Find more use cases at <a href=\"https://docs.buildship.com/ai-models/assistant\" rel=\"noopener noreferrer\" target=\"_blank\">https://docs.buildship.com/ai-models/assistant</a></p>"
 }

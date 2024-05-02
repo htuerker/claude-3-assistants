@@ -2,9 +2,6 @@ import { AssistantsClient, ToolDefinition } from "@azure/openai-assistants";
 import { AzureKeyCredential } from "@azure/openai";
 import { setTimeout } from "timers/promises";
 
-import { Node } from "../types";
-import beautify from 'json-beautify';
-
 const nodeToOpenAiFunction: (node: Node) => ToolDefinition = (node) => {
   return {
     type: "function",
@@ -36,21 +33,24 @@ const nodeToOpenAiFunction: (node: Node) => ToolDefinition = (node) => {
 const sleep: (ms: number) => Promise<any> = (ms) =>
   new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));
 
+type Params {
+  azureApiKey: string;
+  resource: string;
+  assistantId: string;
+  threadId: string;
+  userPrompt: string;
+  builtInTools: string[];
+  instructions: any;
+}
+
 export default async function assistant(
-  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions }:
-    { azureApiKey: string, resource: string, assistantId: string, threadId: string, userPrompt: string, builtInTools: string[], instructions: any },
-  { logging, execute, nodes }:
-    { logging: any, execute: any, nodes: Node[] }
+  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions }: Params,
+  { logging, execute, nodes }: any
 ) {
 
   const tools = nodes?.map(nodeToOpenAiFunction) ?? [];
 
-  console.log("***");
-  console.log("Tools: ", beautify(tools, null as any, 2, 200));
-  console.log("***");
-
   const endpoint = `https://${resource}.openai.azure.com`;
-
   const credentials = new AzureKeyCredential(azureApiKey);
   const assistantsClient = new AssistantsClient(endpoint, credentials);
 
@@ -62,10 +62,6 @@ export default async function assistant(
     threadId = (await assistantsClient.createThread({ messages })).id;
     logging.log("New thread created with ID:", threadId);
   }
-
-  console.log("***");
-  console.log("Create thread: ", beautify(threadId, null as any, 2, 200));
-  console.log("***");
 
   // Retrieval tool isn't supported in Azure yet
   // builtInTools.includes("retrieval") && tools.push({ type: "retrieval" });
@@ -81,10 +77,6 @@ export default async function assistant(
     await sleep(1000);
     runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);
 
-    console.log("***");
-    console.log("Create run: ", beautify(runResponse, null as any, 2, 200));
-    console.log("***");
-
     const isToolUse = runResponse.status === "requires_action" && runResponse.requiredAction?.type === "submit_tool_outputs";
     if (isToolUse) {
       const toolOutputs = [];
@@ -98,7 +90,7 @@ export default async function assistant(
           logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);
           throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)
         }
-        const node = nodes?.find(node => node.id === toolUse.function.name);
+        const node = nodes?.find((node: Node) => node.id === toolUse.function.name);
         if (!node) {
           throw new Error(`Unknown tool: ${toolUse.function.name}`);
         }
@@ -141,3 +133,26 @@ export default async function assistant(
     };
   }
 }
+
+type Node = {
+  label: string;
+  meta: {
+    id: string;
+    description: string;
+    name: string;
+    [key: string]: any;
+  };
+  inputs: {
+    type: string;
+    required: string[];
+    properties: Record<string, {
+      description: string;
+      buildship?: {
+        toBeAutoFilled?: boolean;
+        [key: string]: any;
+      }
+      [key: string]: any;
+    }>;
+  };
+  [key: string]: any;
+};

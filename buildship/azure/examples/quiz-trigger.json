@@ -1,433 +1,389 @@
 {
   "nodes": [
     {
-      "label": "Claude Assistant",
-      "output": {
+      "inputs": {
         "properties": {
-          "chatHistory": { "type": "array", "description": "", "title": "Chat History", "buildship": { "index": 1 } },
-          "error": { "title": "Error", "description": "", "buildship": { "index": 2 } },
-          "response": { "title": "Response", "type": "string", "description": "", "buildship": { "index": 0 } },
-          "data": {
-            "type": "object",
-            "title": "Data",
-            "properties": {},
-            "description": "",
-            "buildship": { "index": 3 }
+          "assistantId": {
+            "description": "The ID of the assistant to use. You need to create the assistant in the Azure OpenAI Studio.",
+            "type": "string",
+            "buildship": { "index": 1, "sensitive": false },
+            "pattern": "",
+            "title": "Assistant ID"
+          },
+          "threadId": {
+            "buildship": { "index": 4 },
+            "description": "The ID of the conversation thread to use. If not specified, a new thread will be created.",
+            "title": "Thread ID",
+            "type": "string"
+          },
+          "azureApiKey": {
+            "pattern": "",
+            "title": "Azure API key",
+            "description": "The Azure API key to use for authentication.",
+            "type": "string",
+            "buildship": { "sensitive": false, "index": 0 }
+          },
+          "instructions": {
+            "description": "Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis.",
+            "type": "string",
+            "title": "Instructions",
+            "buildship": { "index": 5 }
+          },
+          "resource": {
+            "type": "string",
+            "description": "The name of your Azure resource.",
+            "title": "Resource",
+            "buildship": { "hidden": false, "sensitive": false, "index": 2 },
+            "pattern": ""
+          },
+          "builtInTools": {
+            "type": "array",
+            "buildship": {
+              "options": [
+                { "label": "Document Retrieval", "value": "retrieval" },
+                { "value": "code_interpreter", "label": "Code Interpreter" }
+              ],
+              "index": 6
+            },
+            "title": "Built-in Tools",
+            "enum": ["retrieval", "code_interpreter"],
+            "description": "Select the OpenAI assistant built-in tools to use."
+          },
+          "userPrompt": {
+            "buildship": { "sensitive": false, "index": 6 },
+            "title": "User prompt",
+            "type": "string",
+            "description": "The prompt to send to the assistant as user message.\n",
+            "default": "",
+            "pattern": ""
           }
         },
-        "title": "",
-        "description": "",
-        "type": "object",
-        "buildship": { "index": 0 }
+        "required": ["userPrompt", "resource", "assistantId", "azureApiKey"],
+        "type": "object"
       },
-      "integrations": [],
-      "onFail": null,
-      "type": "script",
+      "name": "Azure OpenAI Assistant",
+      "id": "f88bd6fb-b9d1-4949-bd0f-e8f14a68c742",
       "nodes": [
         {
-          "description": "Save quiz data in JSON format:\n{\"question\":\"\", \"answers\":[list],\"correctAnswer\":\"\", \"keywords\":[list]}",
-          "integrations": [],
-          "script": "import { Firestore } from '@google-cloud/firestore';\n\nexport default async function createDocument({\n    collectionName,\n    id,\n    data,\n    merge,\n},{logging}) {\n    logging.log({data,id,collectionName})\n    logging.log({data})\n    const firestore = new Firestore(undefined);\n    if(id){\n      await firestore.collection(collectionName).doc(id).set(data, {\n          merge\n      });\n      return {\n          id,\n          path:`${collectionName}/${id}`,\n          status: 'success!'\n      };\n    } else{\n      const ref = await firestore.collection(collectionName).add(data);\n      return {\n          id:ref.id,\n          path:ref.path,\n          status: 'success!'\n      };\n    }\n}",
           "inputs": {
-            "required": ["collectionName", "merge", "data"],
             "type": "object",
             "properties": {
+              "data": {
+                "title": "Quiz data",
+                "default": {},
+                "pattern": "",
+                "description": "The quiz data in JSON format with fields: question, options, correctAnswer, keywords",
+                "type": "object",
+                "properties": {},
+                "buildship": { "sensitive": false, "toBeAutoFilled": true, "index": 2 }
+              },
               "collectionName": {
-                "description": "The name of your Firestore collection",
                 "title": "Collection Name",
+                "buildship": { "index": 0 },
                 "type": "string",
-                "buildship": { "index": 0 }
+                "description": "The name of your Firestore collection"
+              },
+              "id": {
+                "type": "string",
+                "buildship": { "sensitive": false, "index": 1 },
+                "description": "The ID of the document to create or update",
+                "title": "Document ID",
+                "pattern": ""
               },
               "merge": {
                 "type": "boolean",
-                "title": "Merge",
-                "default": false,
                 "description": "Whether to merge the data with any existing document",
-                "buildship": { "index": 3 }
-              },
-              "data": {
-                "type": "object",
-                "title": "Quiz data",
-                "default": {},
-                "description": "The quiz data in JSON format with fields: question, options, correctAnswer, keywords",
-                "pattern": "",
-                "properties": {},
-                "buildship": { "index": 2, "sensitive": false, "toBeAutoFilled": true }
-              },
-              "id": {
-                "description": "The ID of the document to create or update",
-                "buildship": { "sensitive": false, "index": 1 },
-                "pattern": "",
-                "type": "string",
-                "title": "Document ID"
+                "title": "Merge",
+                "buildship": { "index": 3 },
+                "default": false
               }
-            }
+            },
+            "required": ["collectionName", "merge", "data"]
           },
+          "id": "6eadd2f5-b78f-41a9-b220-144a021d4f56",
+          "name": "Save Quiz Question",
           "_libRef": {
             "version": "1.0.0",
-            "isDirty": true,
-            "src": "https://storage.googleapis.com/buildship-app-us-central1/cache/builtNodes/@buildship/buildship-create-document/v1_0_0.cjs",
             "libType": "public",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/cache/builtNodes/@buildship/buildship-create-document/v1_0_0.cjs",
             "integrity": "v3:f8ff07ce9cbad39ca8528d0108cc4a3b",
+            "isDirty": true,
             "libNodeRefId": "@buildship/buildship-create-document"
           },
-          "dependencies": { "@google-cloud/firestore": "7.1.0" },
-          "name": "Save Quiz Question",
-          "output": {
-            "buildship": {},
-            "title": "Firestore Response",
-            "type": "object",
-            "properties": {
-              "id": { "buildship": { "index": 1 }, "title": "Id", "type": "string", "description": "Document ID" },
-              "path": {
-                "type": "string",
-                "description": "Document Path",
-                "title": "Path",
-                "buildship": { "index": 2 }
-              },
-              "status": { "buildship": { "index": 0 }, "type": "string", "title": "Status" }
-            },
-            "description": "The response from the Firestore set operation"
-          },
-          "id": "b8875719-3f6a-4cee-8dd5-46bcab78cfa7",
-          "onFail": null,
           "meta": {
             "name": "Save Quiz Question",
-            "description": "save the latest quiz to the database",
-            "id": "buildship-create-document",
             "icon": {
               "type": "URL",
               "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2FIcon.png?alt=media&token=878ed11b-1cf2-45d8-9951-7e95a16d26af&_gl=1*1ld9l67*_ga*NzgyMDk5NjMxLjE2OTY4NzE3ODU.*_ga_CW55HF8NVT*MTY5NjkyMzc5OC4yLjEuMTY5NjkyMzgzMy4yNS4wLjA."
-            }
+            },
+            "description": "save the latest quiz to the database",
+            "id": "buildship-create-document"
+          },
+          "type": "script",
+          "dependencies": { "@google-cloud/firestore": "7.1.0" },
+          "description": "Save quiz data in JSON format:\n{\"question\":\"\", \"answers\":[list],\"correctAnswer\":\"\", \"keywords\":[list]}",
+          "integrations": [],
+          "script": "import { Firestore } from '@google-cloud/firestore';\n\nexport default async function createDocument({\n    collectionName,\n    id,\n    data,\n    merge,\n},{logging}) {\n    logging.log({data,id,collectionName})\n    logging.log({data})\n    const firestore = new Firestore(undefined);\n    if(id){\n      await firestore.collection(collectionName).doc(id).set(data, {\n          merge\n      });\n      return {\n          id,\n          path:`${collectionName}/${id}`,\n          status: 'success!'\n      };\n    } else{\n      const ref = await firestore.collection(collectionName).add(data);\n      return {\n          id:ref.id,\n          path:ref.path,\n          status: 'success!'\n      };\n    }\n}",
+          "output": {
+            "description": "The response from the Firestore set operation",
+            "title": "Firestore Response",
+            "type": "object",
+            "properties": {
+              "id": { "description": "Document ID", "type": "string", "buildship": { "index": 1 }, "title": "Id" },
+              "path": {
+                "buildship": { "index": 2 },
+                "description": "Document Path",
+                "title": "Path",
+                "type": "string"
+              },
+              "status": { "type": "string", "title": "Status", "buildship": { "index": 0 } }
+            },
+            "buildship": {}
           },
           "label": "updateDatabase",
-          "type": "script"
+          "onFail": null
         }
       ],
-      "name": "Claude Assistant",
+      "script": "import { AssistantsClient } from \"@azure/openai-assistants\";\nimport { AzureKeyCredential } from \"@azure/openai\";\nimport { setTimeout } from \"timers/promises\";\n\nconst nodeToOpenAiFunction = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: node.id,\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\nconst sleep = (ms) =>\n  new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));\n\nexport default async function assistant(\n  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },\n  { logging, execute, nodes }\n) {\n  const tools = nodes?.map(nodeToOpenAiFunction) ?? [];\n\n  const endpoint = `https://${resource}.openai.azure.com`;\n  const credentials = new AzureKeyCredential(azureApiKey);\n  const assistantsClient = new AssistantsClient(endpoint, credentials);\n\n  const messages = [{ role: \"user\", content: userPrompt }];\n\n  if (threadId) {\n    await assistantsClient.createMessage(threadId, \"user\", userPrompt);\n  } else {\n    threadId = (await assistantsClient.createThread({ messages })).id;\n    logging.log(\"New thread created with ID:\", threadId);\n  }\n\n  // Retrieval tool isn't supported in Azure yet\n  // builtInTools.includes(\"retrieval\") && tools.push({ type: \"retrieval\" });\n  builtInTools.includes(\"code_interpreter\") && tools.push({ type: \"code_interpreter\" });\n\n  let runResponse = await assistantsClient.createRun(threadId, {\n    assistantId,\n    instructions,\n    tools,\n  });\n\n  do {\n    await sleep(1000);\n    runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);\n\n    const isToolUse = runResponse.status === \"requires_action\" && runResponse.requiredAction?.type === \"submit_tool_outputs\";\n    if (isToolUse) {\n      const toolOutputs = [];\n      const toolUses = runResponse.requiredAction?.submitToolOutputs?.toolCalls || [];\n      for (const toolUse of toolUses) {\n        let args;\n        try {\n          args = JSON.parse(toolUse.function.arguments);\n          logging.log(args);\n        } catch (err) {\n          logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);\n          throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)\n        }\n        const node = nodes?.find(node => node.id === toolUse.function.name);\n        if (!node) {\n          throw new Error(`Unknown tool: ${toolUse.function.name}`);\n        }\n        const toolOutput = await execute(node.label, args);\n\n        logging.log(toolOutput);\n        toolOutputs.push({\n          toolCallId: toolUse.id,\n          output: toolOutput ? JSON.stringify(toolOutput) : \"\"\n        });\n        logging.log(\n          `Executed ${node.label} with output:`,\n          toolOutput\n        );\n      }\n      runResponse = await assistantsClient.submitToolOutputsToRun(runResponse.threadId, runResponse.id, toolOutputs);\n    }\n  } while (runResponse.status === \"queued\" || runResponse.status === \"in_progress\")\n\n  const { data } = await assistantsClient.listMessages(runResponse.threadId, { order: \"desc\" });\n\n  const resultMessage = data[0];\n\n  if (resultMessage.content[0].type === \"text\") {\n    return {\n      \"response\": resultMessage.content[0].text.value,\n      \"annotations\": resultMessage.content[0].text.annotations,\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n\n  if (resultMessage.content[0].type === \"image_file\") {\n    return {\n      \"response\": \"\",\n      \"imageFileId\": resultMessage.content[0].imageFile.fileId,\n      \"annotations\": [],\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n}",
+      "onFail": null,
+      "label": "Azure OpenAI Assistant",
       "meta": {
-        "name": "Claude Assistant",
-        "icon": {
-          "type": "URL",
-          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e"
-        },
-        "description": "",
-        "id": "claude-assistant-node"
-      },
-      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean)\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },\n  { logging, execute, nodes }\n) {\n  // TODO\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": instructions || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.status !== 200) {\n        throw response.error;\n      }\n      if (response.data.type === \"error\") {\n          throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if(isEndTurn) break;\n      \n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n      \n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessage = {\n          role: \"user\",\n          content: []\n        };\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          const toolResponse = await execute(node.label, toolUse.input);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessage.content.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push(toolUseMessage);\n      }\n\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(\"Error\");\n    logging.log(error.config);\n    logging.log(error.message);\n    return { error: error.message }\n  }\n}",
-      "inputs": {
-        "required": ["maxTokens", "userPrompt", "claudeApiKey", "instructions", "model"],
-        "properties": {
-          "maxTokens": {
-            "type": "number",
-            "title": "Max Tokens",
-            "buildship": { "sensitive": false, "index": 4 },
-            "default": "",
-            "pattern": "",
-            "description": ""
-          },
-          "userPrompt": {
-            "buildship": { "index": 2, "sensitive": false },
-            "type": "string",
-            "pattern": "",
-            "default": "",
-            "title": "User Prompt",
-            "description": ""
-          },
-          "claudeApiKey": {
-            "buildship": { "sensitive": true, "index": 0 },
-            "type": "string",
-            "pattern": "",
-            "description": "The OpenAI API key to use for authentication.",
-            "title": "API Key"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string",
-            "default": "claude-3-opus-20240229",
-            "pattern": "",
-            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
-            "buildship": {
-              "sensitive": false,
-              "options": [
-                { "value": "claude-3-opus-20240229", "label": "Claude 3 Opus" },
-                { "value": "claude-3-sonnet-20240229", "label": "Claude 3 Sonnet" },
-                { "label": "Claude 3 Haiku", "value": "claude-3-haiku-20240307" }
-              ],
-              "index": 4
-            },
-            "description": ""
-          },
-          "instructions": {
-            "buildship": { "index": 1, "sensitive": false },
-            "type": "string",
-            "default": "",
-            "title": "Instructions",
-            "description": "",
-            "pattern": ""
-          },
-          "chatHistory": {
-            "description": "",
-            "buildship": { "sensitive": false, "index": 5 },
-            "default": [],
-            "pattern": "",
-            "type": "array",
-            "title": "Chat History"
-          }
-        },
-        "type": "object"
+        "name": "Azure OpenAI Assistant",
+        "id": "azure-openai-assistant-node",
+        "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input.",
+        "icon": { "type": "URL", "url": "https://www.svgrepo.com/show/448274/azure.svg" }
       },
       "subType": "assistant",
-      "dependencies": { "axios": "0.28.1" },
-      "id": "021cda49-e63a-48c7-8af5-44e30103e391"
+      "type": "script",
+      "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input. once it has completed the request, it will return its response as output message. [Full Documentation](https://docs.buildship.com/core-nodes/openai-assistant).",
+      "output": {
+        "buildship": { "index": 0 },
+        "description": "",
+        "properties": {
+          "annotations": {
+            "description": "The annotations of the message",
+            "type": "array",
+            "title": "Annotations",
+            "buildship": { "index": 3 }
+          },
+          "threadId": {
+            "title": "Thread ID",
+            "description": "The thread ID that this message belongs to.",
+            "buildship": { "index": 1 },
+            "type": "string"
+          },
+          "messages": {
+            "description": "The content of the message in array of text and/or images.",
+            "buildship": { "index": 0 },
+            "type": "array",
+            "title": "Messages"
+          },
+          "response": { "buildship": { "index": 2 }, "description": "", "title": "Response", "type": "string" }
+        },
+        "type": "object",
+        "title": "Assistant Response"
+      }
     },
     {
       "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "label": "Return",
+      "response": { "2XX": { "properties": {}, "type": "object" } },
       "inputs": {
         "type": "object",
-        "required": [],
         "properties": {
           "cacheMaxAge": {
+            "title": "Cache Time",
+            "default": 0,
             "buildship": { "index": 2 },
             "type": "number",
-            "default": 0,
-            "description": "Set cache duration in seconds",
-            "title": "Cache Time"
+            "description": "Set cache duration in seconds"
           },
           "status": {
-            "title": "Status code",
-            "description": "The HTTP status code to return",
-            "type": "string",
-            "default": "200",
-            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "500"],
             "buildship": {
+              "index": 0,
               "options": [
                 { "value": "200", "label": "OK (200)" },
-                { "value": "201", "label": "Created (201)" },
+                { "label": "Created (201)", "value": "201" },
                 { "value": "202", "label": "Accepted (202)" },
                 { "value": "301", "label": "Redirect (301)" },
-                { "label": "No Content (204)", "value": "204" },
-                { "value": "400", "label": "Bad Request (400)" },
-                { "label": "Unauthorized (401)", "value": "401" },
-                { "value": "403", "label": "Forbidden (403)" },
-                { "value": "404", "label": "Not Found (404)" },
+                { "value": "204", "label": "No Content (204)" },
+                { "label": "Bad Request (400)", "value": "400" },
+                { "value": "401", "label": "Unauthorized (401)" },
+                { "label": "Forbidden (403)", "value": "403" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "value": "429", "label": "Too Many Requests (429)" },
                 { "value": "500", "label": "Internal Server Error (500)" }
-              ],
-              "index": 0
-            }
+              ]
+            },
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
+            "default": "200",
+            "description": "The HTTP status code to return",
+            "type": "string",
+            "title": "Status code"
           },
           "value": {
-            "description": "The value to return",
-            "title": "Value",
-            "type": "string",
             "default": "",
+            "type": "string",
+            "title": "Value",
+            "description": "The value to return",
             "buildship": { "index": 1 }
           }
-        }
+        },
+        "required": []
       },
-      "id": "27357f1a-6b7e-4b1e-936c-990c59d62a50",
-      "label": "Return",
-      "type": "return",
-      "response": {
-        "200": {
-          "description": "",
-          "title": "",
-          "buildship": { "index": 0 },
-          "type": "object",
-          "properties": {
-            "chatHistory": { "type": "array", "buildship": { "index": 1 }, "description": "", "title": "Chat History" },
-            "data": {
-              "title": "Data",
-              "type": "object",
-              "buildship": { "index": 3 },
-              "description": "",
-              "properties": {}
-            },
-            "response": { "title": "Response", "description": "", "type": "string", "buildship": { "index": 0 } },
-            "error": { "description": "", "title": "Error", "buildship": { "index": 2 } }
-          }
-        }
-      }
+      "id": "2bea61a8-6d8d-480d-9e10-6cd753c5fe8e",
+      "type": "return"
     }
   ],
   "trigger": {
+    "script": "",
+    "label": "Rest API Call",
     "request": {
+      "buildship": {},
       "properties": {
-        "body": {
-          "type": "object",
-          "properties": {
-            "1707747204621": { "title": "sample", "type": "string", "description": "", "buildship": { "index": 0 } }
-          },
+        "query": {
           "buildship": {},
-          "title": "Body",
-          "description": "Body of the request"
+          "type": "object",
+          "properties": {},
+          "title": "Query",
+          "description": "Query parameters"
         },
         "headers": {
           "properties": {},
           "buildship": {},
-          "title": "Request Headers",
           "description": "Headers of the request",
-          "type": "object"
+          "type": "object",
+          "title": "Request Headers"
         },
-        "query": {
-          "properties": {},
-          "title": "Query",
+        "body": {
+          "title": "Body",
+          "type": "object",
           "buildship": {},
-          "description": "Query parameters",
-          "type": "object"
+          "properties": {
+            "threadId": { "title": "Thread Id", "description": "", "type": "string", "buildship": { "index": 1 } },
+            "message": { "buildship": { "index": 0 }, "type": "string", "title": "Message", "description": "" }
+          },
+          "description": "Body of the request"
         }
       },
-      "buildship": {},
       "title": "Request",
       "required": [],
       "type": "object"
     },
-    "id": "http",
-    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
-    "live": true,
-    "script": "",
-    "label": "Rest API Call",
+    "dependencies": {},
     "type": "http",
+    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
+    "meta": {
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "id": "http",
+      "name": "Rest API Call",
+      "icon": {}
+    },
+    "groupId": null,
     "output": {
       "buildship": {},
+      "type": "object",
+      "title": "Request",
       "properties": {
-        "headers": {
-          "properties": {
-            "content-type": {
-              "type": "string",
-              "description": "Content-Type of the request",
-              "buildship": { "index": 0 },
-              "title": "Content-Type"
-            },
-            "authorization": {
-              "type": "string",
-              "buildship": { "index": 1 },
-              "description": "Authorization header",
-              "title": "Authorization"
-            }
-          },
-          "buildship": {},
-          "description": "Headers of the request",
-          "type": "object",
-          "title": "Headers"
+        "query": {
+          "description": "Query parameters",
+          "buildship": { "index": 0 },
+          "title": "Query parameters",
+          "type": "object"
         },
         "body": {
           "type": "object",
           "buildship": { "index": 1 },
-          "title": "Body",
-          "description": "Body of the request"
+          "description": "Body of the request",
+          "title": "Body"
         },
-        "query": {
-          "buildship": { "index": 0 },
-          "title": "Query parameters",
-          "description": "Query parameters",
+        "headers": {
+          "title": "Headers",
+          "description": "Headers of the request",
+          "properties": {
+            "authorization": {
+              "title": "Authorization",
+              "type": "string",
+              "description": "Authorization header",
+              "buildship": { "index": 1 }
+            },
+            "content-type": {
+              "type": "string",
+              "buildship": { "index": 0 },
+              "title": "Content-Type",
+              "description": "Content-Type of the request"
+            }
+          },
+          "buildship": {},
           "type": "object"
         }
-      },
-      "title": "Request",
-      "type": "object"
+      }
     },
-    "dependencies": {},
-    "testingSchema": [
-      {
-        "label": "Endpoint URL",
-        "disabled": true,
-        "name": "endpointURL",
-        "type": "shortText",
-        "prefill": "endpointURL"
-      },
-      { "prefill": "apiRequestData", "name": "apiRequestData", "type": "apiRequestData" }
-    ],
-    "meta": {
-      "icon": {},
-      "name": "Rest API Call",
-      "id": "http",
-      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)"
-    },
+    "id": "http",
     "inputs": {
       "properties": {
-        "path": {
-          "default": "/",
-          "type": "string",
-          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
-          "title": "Path",
-          "buildship": { "index": 0, "sensitive": false },
-          "pattern": ""
-        },
         "method": {
-          "enum": ["GET", "POST", "PUT", "DELETE"],
-          "pattern": "",
-          "default": "GET",
-          "description": "The HTTP method for the incoming request.",
           "type": "string",
+          "default": "GET",
+          "pattern": "",
+          "description": "The HTTP method for the incoming request.",
           "title": "Method",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
           "buildship": {
+            "sensitive": false,
             "options": [
               { "value": "GET", "label": "GET" },
-              { "value": "POST", "label": "POST" },
-              { "label": "PUT", "value": "PUT" },
+              { "label": "POST", "value": "POST" },
+              { "value": "PUT", "label": "PUT" },
               { "label": "DELETE", "value": "DELETE" }
             ],
-            "index": 1,
-            "sensitive": false
+            "index": 1
           }
+        },
+        "path": {
+          "pattern": "",
+          "default": "/",
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "title": "Path",
+          "buildship": { "sensitive": false, "index": 0 },
+          "type": "string"
         }
       },
       "required": ["method", "path"],
       "type": "object"
-    }
+    },
+    "testingSchema": [
+      {
+        "disabled": true,
+        "name": "endpointURL",
+        "prefill": "endpointURL",
+        "type": "shortText",
+        "label": "Endpoint URL"
+      },
+      { "prefill": "apiRequestData", "type": "apiRequestData", "name": "apiRequestData" }
+    ],
+    "order": 1,
+    "live": true
   },
   "nodeValues": {
-    "test-node-dd096fec-5cb2-4d0b-a048-94418e2c8cc6": {
-      "id": "",
-      "data": {},
-      "merge": false,
-      "collectionName": "Quiz"
+    "http": { "path": "/azure-quiz-master", "method": "POST" },
+    "6eadd2f5-b78f-41a9-b220-144a021d4f56": { "collectionName": "", "merge": true, "id": "", "data": {} },
+    "f88bd6fb-b9d1-4949-bd0f-e8f14a68c742": {
+      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question. When you are given tools to use, you must use them following the guidelines for each tool. - Guidelines: When a new quiz is generated you must use 'updateDatabase' tool to save the latest quiz to the database",
+      "threadId": { "keys": ["request", "body", "threadId"] },
+      "userPrompt": { "keys": ["request", "body", "message"] },
+      "assistantId": "",
+      "resource": "",
+      "azureApiKey": ""
     },
-    "b8875719-3f6a-4cee-8dd5-46bcab78cfa7": { "data": {}, "merge": true, "collectionName": "Quiz", "id": "" },
-    "473be578-0b84-4e24-b593-2ae17ffe2100": {
-      "model": "claude-3-opus-20240229",
-      "chatHistory": { "type": "javascript", "expression": "[]" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question. When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:When a new quiz is generated you must use 'updateDatabase' tool to save the latest quiz to the database",
-      "userPrompt": {
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
-        "type": "javascript",
-        "hasErrors": false
-      },
-      "maxTokens": 1024,
-      "claudeApiKey": { "secretName": "claude-harini" }
-    },
-    "2b780b87-721a-48e0-8218-38718e58b7c6": { "data": {}, "collectionName": "Quiz", "merge": true, "id": "" },
-    "27357f1a-6b7e-4b1e-936c-990c59d62a50": {
-      "value": { "keys": ["021cda49-e63a-48c7-8af5-44e30103e391"] },
-      "cacheMaxAge": "",
-      "status": "200"
-    },
-    "http": { "path": "/claude-savetoDB", "method": "POST" },
-    "f466ad48-7027-4a0a-8c22-dca3038e6666": {
-      "threadId": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].threadID" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question. When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:When a new quiz is generated you must use 'updateDatabase' tool to save the latest quiz to the database",
-      "apiKey": { "secretName": "openai" },
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "prompt": { "expression": "ctx[\"root\"][\"request\"][\"body\"].message", "type": "javascript" }
-    },
-    "021cda49-e63a-48c7-8af5-44e30103e391": {
-      "maxTokens": 1024,
-      "userPrompt": {
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
-        "hasErrors": false,
+    "2bea61a8-6d8d-480d-9e10-6cd753c5fe8e": {
+      "cacheMaxAge": 0,
+      "value": {
+        "expression": "{\n  \"message\": ctx[\"root\"][\"f88bd6fb-b9d1-4949-bd0f-e8f14a68c742\"][\"response\"],\n  \"threadId\": ctx[\"root\"][\"f88bd6fb-b9d1-4949-bd0f-e8f14a68c742\"][\"threadId\"]\n}",
         "type": "javascript"
       },
-      "chatHistory": {
-        "type": "javascript",
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].chatHistory",
-        "hasErrors": false
-      },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question. When you are given tools to use, you must use them following the guidelines for each tool.Guidelines:When a new quiz is generated you must use 'updateDatabase' tool to save the latest quiz to the database",
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "model": "claude-3-haiku-20240307"
-    },
-    "dd096fec-5cb2-4d0b-a048-94418e2c8cc6": { "data": {}, "id": "", "merge": true, "collectionName": "Quiz" }
+      "status": "200"
+    }
   },
-  "notes": ""
+  "notes": "<p>{\"message\":\"History of Ottomans\" }</p>"
 }
