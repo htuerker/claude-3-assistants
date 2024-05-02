@@ -94,7 +94,14 @@ export default async function assistant(
         if (!node) {
           throw new Error(`Unknown tool: ${toolUse.function.name}`);
         }
-        const toolOutput = await execute(node.label, args);
+        // filter hallucinated inputs
+        const inputs = {} as Record<string, unknown>;
+        for (const [inputKey, inputValue] of Object.entries(args)) {
+          if (node.inputs.properties[inputKey]) {
+            inputs[inputKey] = inputValue;
+          }
+        }
+        const toolOutput = await execute(node.label, inputs);
 
         logging.log(toolOutput);
         toolOutputs.push({
