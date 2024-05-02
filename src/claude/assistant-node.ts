@@ -110,8 +110,6 @@ export default async function assistant(
           for (const [inputKey, inputValue] of Object.entries(toolUse.input)) {
             if (node.inputs.properties[inputKey]) {
               inputs[inputKey] = inputValue;
-            } else {
-              logging.log("Hallucinated input: ", inputKey, inputValue);
             }
           }
           const toolResponse = await execute(node.label, inputs);
