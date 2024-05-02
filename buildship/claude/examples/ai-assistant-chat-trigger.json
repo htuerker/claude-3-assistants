@@ -2,480 +2,304 @@
   "nodes": [
     {
       "label": "Claude Assistant",
-      "subType": "assistant",
       "integrations": [],
       "output": {
-        "type": "object",
-        "title": "",
-        "description": "",
         "buildship": { "index": 0 },
         "properties": {
+          "error": { "title": "Error", "buildship": { "index": 2 }, "description": "" },
+          "chatHistory": { "buildship": { "index": 1 }, "type": "array", "description": "", "title": "Chat History" },
+          "response": { "type": "string", "title": "Response", "buildship": { "index": 0 }, "description": "" },
           "data": {
-            "properties": {},
-            "buildship": { "index": 3 },
-            "title": "Data",
             "description": "",
-            "type": "object"
-          },
-          "response": { "buildship": { "index": 0 }, "title": "Response", "type": "string", "description": "" },
-          "error": { "description": "", "buildship": { "index": 2 }, "title": "Error" },
-          "chatHistory": { "buildship": { "index": 1 }, "type": "array", "title": "Chat History", "description": "" }
-        }
+            "title": "Data",
+            "type": "object",
+            "properties": {},
+            "buildship": { "index": 3 }
+          }
+        },
+        "description": "",
+        "title": "",
+        "type": "object"
       },
       "onFail": null,
-      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean)\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },\n  { logging, execute, nodes }\n) {\n  // TODO\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": instructions || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.status !== 200) {\n        throw response.error;\n      }\n      if (response.data.type === \"error\") {\n          throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if(isEndTurn) break;\n      \n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n      \n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessage = {\n          role: \"user\",\n          content: []\n        };\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          const toolResponse = await execute(node.label, toolUse.input);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessage.content.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push(toolUseMessage);\n      }\n\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(\"Error\");\n    logging.log(error.config);\n    logging.log(error.message);\n    return { error: error.message }\n  }\n}",
-      "nodes": [],
-      "name": "Claude Assistant",
-      "type": "script",
+      "dependencies": { "axios": "0.28.1" },
       "meta": {
-        "id": "claude-assistant-node",
         "description": "",
-        "name": "Claude Assistant",
+        "id": "claude-assistant-node",
         "icon": {
-          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e",
-          "type": "URL"
-        }
+          "type": "URL",
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e"
+        },
+        "name": "Claude Assistant"
       },
-      "id": "831dc836-1efd-4e55-8b7d-a8dbc5c7b0ec",
+      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n        if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n        return false;\n      }).filter(Boolean) as string[],\n    },\n  };\n}\n\ntype Params = {\n  claudeApiKey: string;\n  model: string;\n  maxTokens: number;\n  userPrompt: string;\n  systemPrompt?: string;\n  chatHistory?: ClaudeMessage[];\n};\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, chatHistory }: Params,\n  { logging, execute, nodes }: any\n) {\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools: ClaudeTool[] = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": systemPrompt || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  } as ClaudeRequest;\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.data.type === \"error\") {\n        throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if (isEndTurn) break;\n\n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n\n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessageContent = [] as ClaudeToolResultContent[];\n\n        const toolUses: ClaudeToolUseContent[] = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find((node: Node) => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          // filter hallucinated inputs\n          const inputs = {} as Record<string, string>;\n          for (const [inputKey, inputValue] of Object.entries(toolUse.input)) {\n            if (node.inputs.properties[inputKey]) {\n              inputs[inputKey] = inputValue;\n            }\n          }\n          const toolResponse = await execute(node.label, inputs);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessageContent.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push({\n          role: \"user\",\n          content: toolUseMessageContent\n        });\n      }\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(`Error: ${error}`);\n    return { error }\n  }\n}\n\ntype Node = {\n  label: string;\n  meta: {\n    id: string;\n    description: string;\n    name: string;\n    [key: string]: any;\n  };\n  inputs: {\n    type: string;\n    required: string[];\n    properties: Record<string, {\n      description: string;\n      buildship?: {\n        toBeAutoFilled?: boolean;\n        [key: string]: any;\n      }\n      [key: string]: any;\n    }>;\n  };\n  [key: string]: any;\n};\n\ntype ClaudeTool = {\n  name: string;\n  description: string;\n  input_schema: {\n    type: string;\n    properties: Record<string, {\n      type: string;\n      description: string;\n      enum?: string[];\n    }>;\n    required: string[];\n  };\n};\n\ntype ClaudeTextContent = {\n  type: \"text\";\n  text: string;\n};\n\ntype ClaudeToolUseContent = {\n  type: \"tool_use\",\n  id: string,\n  name: string,\n  input: Record<string, string>\n};\n\ntype ClaudeToolResultContent = {\n  type: \"tool_result\",\n  tool_use_id: string,\n  content: string\n};\n\ntype ClaudeMessage = {\n  role: \"user\" | \"assistant\",\n  content: ClaudeResponse[\"content\"]\n};\n\ntype ClaudeRequest = {\n  \"model\": string,\n  \"max_tokens\": number,\n  \"tools\": ClaudeTool[],\n  \"messages\": ClaudeMessage[]\n};\n\ntype ClaudeResponse = {\n  \"id\": string,\n  \"type\": \"message\",\n  \"role\": \"assistant\",\n  \"model\": string,\n  \"stop_sequence\": null,\n  \"usage\": { \"input_tokens\": number, \"output_tokens\": number },\n  \"content\": string | ClaudeTextContent[] | ClaudeToolUseContent[] | ClaudeToolResultContent[];\n  \"stop_reason\": \"tool_use\" | \"stop_sequence\" | \"end_turn\"\n};\n",
+      "type": "script",
+      "id": "6c80d420-0098-4499-a3b7-18a657fdf32b",
+      "name": "Claude Assistant",
       "inputs": {
-        "type": "object",
         "properties": {
+          "maxTokens": {
+            "description": "",
+            "buildship": { "index": 4, "sensitive": false },
+            "title": "Max Tokens",
+            "type": "number",
+            "pattern": "",
+            "default": ""
+          },
+          "systemPrompt": {
+            "pattern": "",
+            "type": "string",
+            "buildship": { "sensitive": false, "index": 1 },
+            "description": "",
+            "default": "",
+            "title": "Instructions"
+          },
+          "claudeApiKey": {
+            "title": "API Key",
+            "type": "string",
+            "description": "The OpenAI API key to use for authentication.",
+            "pattern": "",
+            "buildship": { "sensitive": true, "index": 0 }
+          },
           "model": {
             "pattern": "",
             "type": "string",
-            "title": "Model",
-            "description": "",
             "default": "claude-3-opus-20240229",
-            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
+            "description": "",
             "buildship": {
-              "sensitive": false,
               "options": [
                 { "label": "Claude 3 Opus", "value": "claude-3-opus-20240229" },
-                { "value": "claude-3-sonnet-20240229", "label": "Claude 3 Sonnet" },
+                { "label": "Claude 3 Sonnet", "value": "claude-3-sonnet-20240229" },
                 { "value": "claude-3-haiku-20240307", "label": "Claude 3 Haiku" }
               ],
-              "index": 4
-            }
+              "index": 4,
+              "sensitive": false
+            },
+            "title": "Model",
+            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
           },
-          "chatHistory": {
-            "title": "Chat History",
+          "threadId": {
+            "pattern": "",
+            "title": "Thread Id",
+            "type": "string",
             "description": "",
-            "type": "array",
-            "default": [],
             "buildship": { "index": 5, "sensitive": false },
-            "pattern": ""
+            "default": ""
           },
           "userPrompt": {
             "default": "",
-            "description": "",
-            "buildship": { "sensitive": false, "index": 2 },
+            "type": "string",
             "pattern": "",
             "title": "User Prompt",
-            "type": "string"
-          },
-          "claudeApiKey": {
-            "description": "The OpenAI API key to use for authentication.",
-            "type": "string",
-            "title": "API Key",
-            "pattern": "",
-            "buildship": { "index": 0, "sensitive": true }
-          },
-          "maxTokens": {
-            "buildship": { "sensitive": false, "index": 4 },
-            "title": "Max Tokens",
-            "pattern": "",
-            "type": "number",
-            "default": "",
-            "description": ""
-          },
-          "instructions": {
-            "title": "Instructions",
-            "buildship": { "index": 1, "sensitive": false },
-            "pattern": "",
             "description": "",
-            "type": "string",
-            "default": ""
+            "buildship": { "index": 2, "sensitive": false }
           }
         },
-        "required": ["maxTokens", "userPrompt", "claudeApiKey", "instructions", "model"]
+        "type": "object",
+        "required": ["maxTokens", "userPrompt", "claudeApiKey", "model", "systemPrompt"]
       },
-      "dependencies": { "axios": "0.28.1" }
+      "subType": "assistant",
+      "nodes": []
     },
     {
       "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "type": "return",
       "inputs": {
-        "required": [],
-        "type": "object",
         "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "The value to return",
+            "default": "",
+            "buildship": { "index": 1 }
+          },
           "status": {
+            "type": "string",
+            "title": "Status code",
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
             "default": "200",
+            "description": "The HTTP status code to return",
             "buildship": {
               "options": [
-                { "value": "200", "label": "OK (200)" },
-                { "label": "Created (201)", "value": "201" },
+                { "label": "OK (200)", "value": "200" },
+                { "value": "201", "label": "Created (201)" },
                 { "label": "Accepted (202)", "value": "202" },
                 { "label": "Redirect (301)", "value": "301" },
                 { "label": "No Content (204)", "value": "204" },
-                { "label": "Bad Request (400)", "value": "400" },
-                { "label": "Unauthorized (401)", "value": "401" },
+                { "value": "400", "label": "Bad Request (400)" },
+                { "value": "401", "label": "Unauthorized (401)" },
                 { "label": "Forbidden (403)", "value": "403" },
-                { "value": "404", "label": "Not Found (404)" },
-                { "label": "Internal Server Error (500)", "value": "500" }
+                { "label": "Not Found (404)", "value": "404" },
+                { "label": "Too Many Requests (429)", "value": "429" },
+                { "value": "500", "label": "Internal Server Error (500)" }
               ],
               "index": 0
-            },
-            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "500"],
-            "title": "Status code",
-            "type": "string",
-            "description": "The HTTP status code to return"
+            }
           },
           "cacheMaxAge": {
-            "title": "Cache Time",
-            "type": "number",
-            "description": "Set cache duration in seconds",
+            "default": 0,
             "buildship": { "index": 2 },
-            "default": 0
-          },
-          "value": {
-            "type": "string",
-            "buildship": { "index": 1 },
-            "description": "The value to return",
-            "title": "Value",
-            "default": ""
+            "description": "Set cache duration in seconds",
+            "title": "Cache Time",
+            "type": "number"
           }
-        }
+        },
+        "required": [],
+        "type": "object"
       },
+      "response": { "2XX": { "properties": {}, "type": "object" } },
       "label": "Return",
-      "id": "04bdd516-7a32-43a1-b747-488a9471535c",
-      "response": {
-        "200": {
-          "type": "object",
-          "description": "",
-          "buildship": { "index": 0 },
-          "title": "",
-          "properties": {
-            "data": {
-              "type": "object",
-              "properties": {},
-              "title": "Data",
-              "buildship": { "index": 3 },
-              "description": ""
-            },
-            "error": { "buildship": { "index": 2 }, "title": "Error", "description": "" },
-            "response": { "title": "Response", "description": "", "type": "string", "buildship": { "index": 0 } },
-            "chatHistory": { "description": "", "type": "array", "title": "Chat History", "buildship": { "index": 1 } }
-          }
-        }
-      },
-      "type": "return"
+      "id": "6c5b9653-9fd6-445b-ba8c-1bdf04ff065c"
     }
   ],
   "trigger": {
-    "meta": {
-      "name": "Rest API Call",
-      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
-      "id": "http",
-      "icon": {}
-    },
-    "inputs": {
-      "type": "object",
-      "properties": {
-        "path": {
-          "buildship": { "index": 0, "sensitive": false },
-          "title": "Path",
-          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
-          "default": "/",
-          "type": "string",
-          "pattern": ""
-        },
-        "method": {
-          "description": "The HTTP method for the incoming request.",
-          "enum": ["GET", "POST", "PUT", "DELETE"],
-          "pattern": "",
-          "type": "string",
-          "buildship": {
-            "options": [
-              { "value": "GET", "label": "GET" },
-              { "value": "POST", "label": "POST" },
-              { "value": "PUT", "label": "PUT" },
-              { "value": "DELETE", "label": "DELETE" }
-            ],
-            "index": 1,
-            "sensitive": false
-          },
-          "default": "GET",
-          "title": "Method"
-        }
-      },
-      "required": ["method", "path"]
-    },
-    "dependencies": {},
-    "id": "http",
-    "testingSchema": [
-      {
-        "label": "Endpoint URL",
-        "name": "endpointURL",
-        "disabled": true,
-        "prefill": "endpointURL",
-        "type": "shortText"
-      },
-      { "type": "apiRequestData", "prefill": "apiRequestData", "name": "apiRequestData" }
-    ],
-    "type": "http",
-    "label": "Rest API Call",
-    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" },
-    "request": {
-      "title": "Request",
-      "properties": {
-        "headers": {
-          "type": "object",
-          "properties": {},
-          "description": "Headers of the request",
-          "buildship": {},
-          "title": "Request Headers"
-        },
-        "body": {
-          "description": "Body of the request",
-          "type": "object",
-          "title": "Body",
-          "buildship": {},
-          "properties": {
-            "message": { "description": "", "title": "message", "buildship": { "index": 0 }, "type": "string" },
-            "threadId": { "type": "string", "buildship": { "index": 1 }, "description": "", "title": "threadId" }
-          }
-        },
-        "query": {
-          "buildship": {},
-          "description": "Query parameters",
-          "type": "object",
-          "properties": {},
-          "title": "Query"
-        }
-      },
-      "buildship": {},
-      "type": "object",
-      "required": []
-    },
-    "script": "",
     "output": {
-      "title": "Request",
       "buildship": {},
-      "type": "object",
       "properties": {
-        "body": {
-          "buildship": { "index": 1 },
-          "type": "object",
-          "title": "Body",
-          "description": "Body of the request"
-        },
         "headers": {
-          "description": "Headers of the request",
           "buildship": {},
-          "title": "Headers",
+          "description": "Headers of the request",
           "type": "object",
+          "title": "Headers",
           "properties": {
             "authorization": {
               "title": "Authorization",
-              "type": "string",
               "buildship": { "index": 1 },
-              "description": "Authorization header"
+              "description": "Authorization header",
+              "type": "string"
             },
             "content-type": {
-              "type": "string",
+              "buildship": { "index": 0 },
               "title": "Content-Type",
               "description": "Content-Type of the request",
-              "buildship": { "index": 0 }
+              "type": "string"
             }
           }
         },
-        "query": {
+        "body": {
+          "title": "Body",
           "type": "object",
+          "buildship": { "index": 1 },
+          "description": "Body of the request"
+        },
+        "query": {
           "description": "Query parameters",
           "buildship": { "index": 0 },
+          "type": "object",
           "title": "Query parameters"
+        }
+      },
+      "title": "Request",
+      "type": "object"
+    },
+    "request": {
+      "buildship": {},
+      "title": "Request",
+      "required": [],
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "object",
+          "buildship": {},
+          "properties": {
+            "threadId": { "description": "", "type": "string", "title": "Thread Id", "buildship": { "index": 0 } },
+            "message": { "type": "string", "buildship": { "index": 0 }, "title": "Message", "description": "" }
+          },
+          "title": "Body",
+          "description": "Body of the request"
+        },
+        "query": {
+          "buildship": {},
+          "title": "Query",
+          "type": "object",
+          "description": "Query parameters",
+          "properties": {}
+        },
+        "headers": {
+          "properties": {},
+          "title": "Request Headers",
+          "description": "Headers of the request",
+          "type": "object",
+          "buildship": {}
         }
       }
     },
-    "live": true
+    "live": true,
+    "script": "",
+    "groupId": null,
+    "label": "Rest API Call",
+    "id": "http",
+    "testingSchema": [
+      {
+        "name": "endpointURL",
+        "prefill": "endpointURL",
+        "type": "shortText",
+        "disabled": true,
+        "label": "Endpoint URL"
+      },
+      { "name": "apiRequestData", "type": "apiRequestData", "prefill": "apiRequestData" }
+    ],
+    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" },
+    "inputs": {
+      "required": ["method", "path"],
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "title": "Path",
+          "default": "/",
+          "buildship": { "sensitive": false, "index": 0 },
+          "pattern": "",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string",
+          "default": "GET",
+          "buildship": {
+            "index": 1,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "label": "POST", "value": "POST" },
+              { "label": "PUT", "value": "PUT" },
+              { "label": "DELETE", "value": "DELETE" }
+            ],
+            "sensitive": false
+          },
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "description": "The HTTP method for the incoming request.",
+          "pattern": ""
+        }
+      }
+    },
+    "order": 1,
+    "meta": {
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "icon": {},
+      "name": "Rest API Call",
+      "id": "http"
+    },
+    "dependencies": {},
+    "type": "http"
   },
   "nodeValues": {
-    "be5e9167-d80b-4aa2-aa62-3d529c0d2bdc": {
-      "collectionName": "discovery",
-      "data": {
-        "expression": "{\"elementA\":`${ctx[\"root\"][\"request\"][\"body\"].elementA}`,\n \"elementB\":`${ctx[\"root\"][\"request\"][\"body\"].elementB}`,\n  \"result\":`${ctx[\"root\"][\"1706807729706\"][\"else\"][\"1706804529791\"][\"output\"]}`\n}"
-      },
-      "merge": false
-    },
-    "1707147074844": {
-      "cacheMaxAge": 0,
-      "status": "200",
-      "value": { "keys": ["1707147032929", "else", "80047921-4167-4a56-a867-b8a130ea4ead", "content"] }
-    },
-    "7a80191e-9e3c-4a60-9ed5-331c94ff47ba": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "787e13a1-4545-4e69-b036-b9be4fc190f0": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "1707148570211": { "message": "hi!" },
-    "1707147058032.status": { "0": "2", "1": "0", "2": "0" },
-    "1707147251709": { "jsonValue": { "keys": ["request", "body"] } },
-    "71e0b4aa-0c9d-4b4d-bd61-9abcb5f84e79": {
-      "userPrompt": { "keys": ["request", "body", "message"] },
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "maxTokens": 1024,
-      "chatHistory": { "expression": "[]", "type": "javascript" },
-      "model": "claude-3-opus-20240229",
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question"
-    },
-    "831dc836-1efd-4e55-8b7d-a8dbc5c7b0ec": {
-      "model": "claude-3-haiku-20240307",
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "chatHistory": {
-        "hasErrors": false,
-        "type": "javascript",
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].chatHistory"
-      },
-      "userPrompt": {
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
-        "hasErrors": false,
-        "type": "javascript"
-      },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question",
-      "maxTokens": 1024
-    },
-    "test-node-4207f45f-cffe-4669-a4e0-f53b7f0d1f1c": {
-      "maxTokens": "",
-      "instructions": "",
-      "userPrompt": "",
-      "chatHistory": [],
-      "model": "claude-3-opus-20240229",
-      "claudeApiKey": ""
-    },
-    "1707150470569": { "arrays": { "keys": ["1707146970592", "thread_id"] } },
-    "1707150378857": { "message": { "keys": ["1707150470569"] } },
-    "04bdd516-7a32-43a1-b747-488a9471535c": {
-      "value": { "keys": ["831dc836-1efd-4e55-8b7d-a8dbc5c7b0ec"] },
-      "status": "200",
-      "cacheMaxAge": 0
-    },
-    "1707147058032.cacheMaxAge": {},
-    "http": { "method": "POST", "path": "/claude-chat_tutor" },
-    "http.path": { "0": "/" },
-    "c58cb632-5f48-4e2e-99dc-5b5515be778e": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "21784109-d5b0-455e-81bf-0a0380964487": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "d76bc20e-855b-48bf-b209-fe32638329b6": { "message": { "keys": ["request"] } },
-    "80047921-4167-4a56-a867-b8a130ea4ead": {
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadID" },
-      "apiKey": { "secretName": "openai" },
-      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" }
-    },
-    "a9df0073-5874-4bd9-9651-70b63cb579e9": {
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId", "type": "javascript" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question",
-      "assistantId": "asst_zCQdrEg3kGY3w08SD71Lz0h4",
-      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" },
-      "apiKey": { "secretName": "openai" }
-    },
-    "1707212984350": { "status": "200", "value": { "keys": ["1707146970592", "content"] }, "cacheMaxAge": 0 },
-    "test-node-1707146970592": {
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "threadId": "",
-      "apiKey": { "secretName": "openai" },
-      "prompt": "tell a joke"
-    },
-    "1707213620392": {
-      "threadId": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId" },
-      "prompt": { "expression": "ctx[\"root\"][\"request\"][\"body\"].message", "type": "javascript" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question",
-      "assistantId": "asst_zCQdrEg3kGY3w08SD71Lz0h4",
-      "apiKey": { "secretName": "OpenAI" }
-    },
-    "1707147058032": {
+    "6c5b9653-9fd6-445b-ba8c-1bdf04ff065c": {
       "cacheMaxAge": 0,
       "status": "200",
       "value": {
-        "expression": "{\n  \"message\": ctx[\"root\"][\"a9df0073-5874-4bd9-9651-70b63cb579e9\"][\"messages\"],\n  \"threadId\":ctx[\"root\"][\"a9df0073-5874-4bd9-9651-70b63cb579e9\"][\"threadId\"]\n}",
+        "expression": "{\n  \"message\": ctx[\"root\"][\"6c80d420-0098-4499-a3b7-18a657fdf32b\"][\"response\"],\n  \"threadId\": \"\"\n}",
         "type": "javascript"
       }
     },
-    "test-node-1707147251709": { "jsonValue": { "threadID": 231312 } },
-    "b84c22b0-6678-4e7b-b0a5-9812a1e59706": {
+    "6c80d420-0098-4499-a3b7-18a657fdf32b": {
+      "model": "claude-3-haiku-20240307",
+      "claudeApiKey": "",
       "userPrompt": { "keys": ["request", "body", "message"] },
-      "model": "claude-3-opus-20240229",
-      "chatHistory": { "type": "javascript", "expression": "[]" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question",
-      "claudeApiKey": { "secretName": "claude-harini" },
+      "threadId": { "keys": ["request", "body", "threadId"] },
+      "systemPrompt": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question",
       "maxTokens": 1024
     },
-    "test-node-35478025-59af-455e-8bb8-862810c43fec": {
-      "assistantId": "asst_zCQdrEg3kGY3w08SD71Lz0h4",
-      "apiKey": { "secretName": "openai" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question"
-    },
-    "test-node-b84c22b0-6678-4e7b-b0a5-9812a1e59706": {
-      "maxTokens": "",
-      "claudeApiKey": "",
-      "model": "claude-3-opus-20240229",
-      "chatHistory": [],
-      "instructions": "",
-      "userPrompt": ""
-    },
-    "dd6e792c-c445-4aaf-9fff-0ef01371ad7b": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "711d38d9-6032-4688-943a-1d4b29f12254": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "1707147032929": { "condition": { "keys": ["1707147251709"] } },
-    "4207f45f-cffe-4669-a4e0-f53b7f0d1f1c": {
-      "model": "claude-3-opus-20240229",
-      "claudeApiKey": "",
-      "chatHistory": { "expression": "[]", "type": "javascript" },
-      "userPrompt": "",
-      "maxTokens": 1024,
-      "instructions": ""
-    },
-    "test-node-1707213620392": {
-      "prompt": "tell a joke",
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question",
-      "apiKey": { "secretName": "openai" }
-    },
-    "1707214100658": { "status": "200", "cacheMaxAge": 0, "value": { "keys": ["1707213620392"] } },
-    "test-node-71e0b4aa-0c9d-4b4d-bd61-9abcb5f84e79": {
-      "model": "claude-3-opus-20240229",
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "userPrompt": "",
-      "instructions": "",
-      "chatHistory": [],
-      "maxTokens": ""
-    },
-    "e04dda30-9db1-42ba-b593-b20bed376c38": {
-      "merge": false,
-      "data": {
-        "expression": "{\"elementA\":`${ctx[\"root\"][\"request\"][\"body\"].elementA}`,\n \"elementB\":`${ctx[\"root\"][\"request\"][\"body\"].elementB}`,\n  \"result\":`${ctx[\"root\"][\"1706807729706\"][\"else\"][\"1706804529791\"][\"output\"]}`\n}"
-      },
-      "collectionName": "discovery"
-    },
-    "1707147058032.value": {},
-    "1707146970592": {
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "apiKey": { "secretName": "openai" },
-      "instructions": "",
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadID", "type": "javascript" },
-      "prompt": { "expression": "ctx[\"root\"][\"request\"][\"body\"].message", "type": "javascript" }
-    },
-    "35478025-59af-455e-8bb8-862810c43fec": {
-      "apiKey": { "secretName": "openai" },
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId", "type": "javascript" },
-      "assistantId": "asst_zCQdrEg3kGY3w08SD71Lz0h4",
-      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" },
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question"
-    },
-    "http.method": { "0": "G", "1": "E", "2": "T" },
-    "1707214066762": { "message": { "keys": ["1707213620392"] } },
-    "b7f08140-9987-40da-b764-ecc8a1dd372a": {
-      "collectionName": "chatHistory",
-      "merge": false,
-      "data": {
-        "expression": "{\"threadid\":`${ctx[\"root\"][\"1707147032929\"][\"else\"][\"80047921-4167-4a56-a867-b8a130ea4ead\"][\"thread_id\"]}`,\n \"message\":`${ctx[\"root\"][\"request\"][\"body\"].elementB}`\n}"
-      }
-    },
-    "1707149353632": { "arrays": { "keys": ["1707146970592", "content"] } }
+    "http": { "path": "/claude-chat", "method": "POST" }
   },
   "notes": "<p>AI Assistant with conversational memory that you can chat with.</p><p><br></p><p>In this example of a tutor AI Assistant, it helps you with short plan of study for any given topic.</p><p><br></p><p>Try it using this TEST using the foll requgest body:</p><p><br></p><p>{</p><p>\"message\":\"Teach me about northern lights\"</p><p>}</p><p><br></p><p>Short Video: <a href=\"https://www.youtube.com/watch?v=YKAUY9hXzbI\" rel=\"noopener noreferrer\" target=\"_blank\">youtube.com/watch?v=YKAUY9hXzbI</a></p><p>Documentation: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-i-chat-with-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">docs.buildship.com/ai-models/assistant</a></p>"
 }

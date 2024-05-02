@@ -1,446 +1,321 @@
 {
   "nodes": [
     {
-      "label": "Claude Assistant",
-      "nodes": [],
-      "integrations": [],
-      "name": "Claude Assistant",
-      "id": "de9857cb-7e16-4232-96c1-fdbdbc37a726",
-      "meta": {
-        "description": "",
-        "name": "Claude Assistant",
-        "icon": {
-          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e",
-          "type": "URL"
-        },
-        "id": "claude-assistant-node"
-      },
       "subType": "assistant",
-      "type": "script",
-      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean)\n    },\n  };\n}\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, instructions, chatHistory },\n  { logging, execute, nodes }\n) {\n  // TODO\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": instructions || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.status !== 200) {\n        throw response.error;\n      }\n      if (response.data.type === \"error\") {\n          throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if(isEndTurn) break;\n      \n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n      \n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessage = {\n          role: \"user\",\n          content: []\n        };\n        const toolUses = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find(node => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          const toolResponse = await execute(node.label, toolUse.input);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessage.content.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push(toolUseMessage);\n      }\n\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(\"Error\");\n    logging.log(error.config);\n    logging.log(error.message);\n    return { error: error.message }\n  }\n}",
       "inputs": {
-        "required": ["maxTokens", "userPrompt", "claudeApiKey", "instructions", "model"],
+        "required": ["maxTokens", "userPrompt", "claudeApiKey", "model", "systemPrompt"],
         "properties": {
           "maxTokens": {
+            "title": "Max Tokens",
+            "default": "",
+            "pattern": "",
             "type": "number",
-            "buildship": { "sensitive": false, "index": 4 },
+            "description": "",
+            "buildship": { "index": 4, "sensitive": false }
+          },
+          "threadId": {
             "pattern": "",
             "default": "",
-            "title": "Max Tokens",
-            "description": ""
+            "buildship": { "sensitive": false, "index": 5 },
+            "description": "",
+            "title": "Thread Id",
+            "type": "string"
           },
           "userPrompt": {
+            "buildship": { "index": 2, "sensitive": false },
             "title": "User Prompt",
-            "type": "string",
-            "description": "",
             "default": "",
-            "buildship": { "sensitive": false, "index": 2 },
-            "pattern": ""
+            "description": "",
+            "pattern": "",
+            "type": "string"
+          },
+          "claudeApiKey": {
+            "title": "API Key",
+            "type": "string",
+            "buildship": { "sensitive": true, "index": 0 },
+            "pattern": "",
+            "description": "The OpenAI API key to use for authentication."
           },
           "model": {
-            "type": "string",
+            "description": "",
+            "title": "Model",
+            "default": "claude-3-opus-20240229",
+            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
             "buildship": {
               "options": [
                 { "value": "claude-3-opus-20240229", "label": "Claude 3 Opus" },
-                { "value": "claude-3-sonnet-20240229", "label": "Claude 3 Sonnet" },
-                { "value": "claude-3-haiku-20240307", "label": "Claude 3 Haiku" }
+                { "label": "Claude 3 Sonnet", "value": "claude-3-sonnet-20240229" },
+                { "label": "Claude 3 Haiku", "value": "claude-3-haiku-20240307" }
               ],
-              "sensitive": false,
-              "index": 4
+              "index": 4,
+              "sensitive": false
             },
-            "description": "",
-            "title": "Model",
-            "pattern": "",
-            "enum": ["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"],
-            "default": "claude-3-opus-20240229"
-          },
-          "chatHistory": {
-            "title": "Chat History",
-            "description": "",
-            "default": [],
-            "buildship": { "sensitive": false, "index": 5 },
-            "pattern": "",
-            "type": "array"
-          },
-          "instructions": {
-            "default": "",
-            "buildship": { "index": 1, "sensitive": false },
             "type": "string",
-            "description": "",
-            "title": "Instructions",
             "pattern": ""
           },
-          "claudeApiKey": {
+          "systemPrompt": {
+            "buildship": { "sensitive": false, "index": 1 },
+            "title": "Instructions",
             "pattern": "",
-            "buildship": { "sensitive": true, "index": 0 },
-            "title": "API Key",
-            "type": "string",
-            "description": "The OpenAI API key to use for authentication."
+            "description": "",
+            "default": "",
+            "type": "string"
           }
         },
         "type": "object"
       },
+      "onFail": null,
       "output": {
         "type": "object",
         "buildship": { "index": 0 },
-        "description": "",
-        "title": "",
         "properties": {
-          "chatHistory": { "type": "array", "title": "Chat History", "buildship": { "index": 1 }, "description": "" },
-          "error": { "description": "", "buildship": { "index": 2 }, "title": "Error" },
+          "chatHistory": { "type": "array", "description": "", "buildship": { "index": 1 }, "title": "Chat History" },
+          "response": { "description": "", "buildship": { "index": 0 }, "type": "string", "title": "Response" },
           "data": {
-            "description": "",
-            "title": "Data",
             "properties": {},
+            "type": "object",
             "buildship": { "index": 3 },
-            "type": "object"
+            "description": "",
+            "title": "Data"
           },
-          "response": { "buildship": { "index": 0 }, "type": "string", "title": "Response", "description": "" }
-        }
+          "error": { "buildship": { "index": 2 }, "description": "", "title": "Error" }
+        },
+        "description": "",
+        "title": ""
       },
-      "onFail": null,
+      "integrations": [],
+      "meta": {
+        "description": "",
+        "icon": {
+          "type": "URL",
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fanthropic.png?alt=media&token=ec0eb8dc-f0d4-4f97-a144-023f1aa8118e"
+        },
+        "name": "Claude Assistant",
+        "id": "claude-assistant-node"
+      },
+      "script": "import axios from \"axios\";\n\nconst nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {\n  return {\n    // Use node.id as the name of the tool. Spaces are not allowed.\n    name: node.id,\n    description: node.meta.description ?? \"\",\n    input_schema: {\n      type: \"object\",\n      properties: Object.entries(node.inputs.properties)\n        .reduce((properties, [name, value]) => {\n          if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n          return {\n            ...properties, [name]: {\n              type: value.type,\n              enum: value.enum,\n              description: value.description\n            }\n          }\n        }, {}),\n      required: Object.entries(node.inputs.properties).map(([name, value]) => {\n        if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n        return false;\n      }).filter(Boolean) as string[],\n    },\n  };\n}\n\ntype Params = {\n  claudeApiKey: string;\n  model: string;\n  maxTokens: number;\n  userPrompt: string;\n  systemPrompt?: string;\n  chatHistory?: ClaudeMessage[];\n};\n\nexport default async function assistant(\n  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, chatHistory }: Params,\n  { logging, execute, nodes }: any\n) {\n  const version = \"2023-06-01\";\n  const beta = \"tools-2024-04-04\";\n\n  const client = axios.create({\n    baseURL: \"https://api.anthropic.com/v1\",\n    headers: {\n      'Accept': 'application/json',\n      'Content-Type': 'application/json',\n      'x-api-key': claudeApiKey,\n      'anthropic-version': version,\n      'anthropic-beta': beta\n    }\n  });\n\n  const tools: ClaudeTool[] = nodes?.map(nodeToClaudeTool) ?? [];\n\n  const initialMessages = [\n    ...(chatHistory ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"system\": systemPrompt || \"\",\n    \"tools\": tools,\n    \"messages\": initialMessages\n  } as ClaudeRequest;\n\n  try {\n    let request = { ...baseRequest };\n    let requestCount = 1;\n    logging.log(`Claude request(${requestCount}):`, baseRequest);\n    let response = await client.post(\"/messages\", request);\n    logging.log(`Claude response(${requestCount}): `, response.data);\n\n    do {\n      if (response.data.type === \"error\") {\n        throw response.data.error;\n      }\n\n      let result = response.data;\n\n      const isEndTurn = result.stop_reason === \"end_turn\";\n      if (isEndTurn) break;\n\n      const content = result.content;\n      request.messages.push({ role: \"assistant\", content });\n\n      const isToolUse = result.stop_reason === \"tool_use\" && content instanceof Array;\n      if (isToolUse) {\n        const toolUseMessageContent = [] as ClaudeToolResultContent[];\n\n        const toolUses: ClaudeToolUseContent[] = content.filter(content => content.type === \"tool_use\");\n        for (const toolUse of toolUses) {\n          const tool = tools.find(tool => tool.name === toolUse.name);\n          const node = nodes?.find((node: Node) => node.id === toolUse.name);\n          if (!tool || !node) {\n            logging.log(\"Failed to find tool:\");\n            logging.log(toolUse);\n            logging.log(node);\n            throw new Error(\"Failed to find tool\");\n          }\n          logging.log(\"Tool node: \", node.name);\n          // filter hallucinated inputs\n          const inputs = {} as Record<string, string>;\n          for (const [inputKey, inputValue] of Object.entries(toolUse.input)) {\n            if (node.inputs.properties[inputKey]) {\n              inputs[inputKey] = inputValue;\n            }\n          }\n          const toolResponse = await execute(node.label, inputs);\n          logging.log(\"Tool response: \", toolResponse);\n          toolUseMessageContent.push({\n            type: \"tool_result\",\n            tool_use_id: toolUse.id,\n            content: toolResponse ? JSON.stringify(toolResponse) : \"\",\n          });\n        }\n        request.messages.push({\n          role: \"user\",\n          content: toolUseMessageContent\n        });\n      }\n      requestCount++;\n      logging.log(`Claude request(${requestCount}):`, request);\n      response = await client.post(\"/messages\", request);\n      logging.log(`Claude response(${requestCount}): `, response.data);\n    } while (response && response.data && response.data.stop_reason !== \"end_turn\");\n\n    return {\n      response: response.data.content[0].text,\n      chatHistory: [...request.messages, { role: \"assistant\", content: response.data.content }],\n      data: response.data,\n      error: null,\n    }\n  } catch (error) {\n    logging.log(`Error: ${error}`);\n    return { error }\n  }\n}\n\ntype Node = {\n  label: string;\n  meta: {\n    id: string;\n    description: string;\n    name: string;\n    [key: string]: any;\n  };\n  inputs: {\n    type: string;\n    required: string[];\n    properties: Record<string, {\n      description: string;\n      buildship?: {\n        toBeAutoFilled?: boolean;\n        [key: string]: any;\n      }\n      [key: string]: any;\n    }>;\n  };\n  [key: string]: any;\n};\n\ntype ClaudeTool = {\n  name: string;\n  description: string;\n  input_schema: {\n    type: string;\n    properties: Record<string, {\n      type: string;\n      description: string;\n      enum?: string[];\n    }>;\n    required: string[];\n  };\n};\n\ntype ClaudeTextContent = {\n  type: \"text\";\n  text: string;\n};\n\ntype ClaudeToolUseContent = {\n  type: \"tool_use\",\n  id: string,\n  name: string,\n  input: Record<string, string>\n};\n\ntype ClaudeToolResultContent = {\n  type: \"tool_result\",\n  tool_use_id: string,\n  content: string\n};\n\ntype ClaudeMessage = {\n  role: \"user\" | \"assistant\",\n  content: ClaudeResponse[\"content\"]\n};\n\ntype ClaudeRequest = {\n  \"model\": string,\n  \"max_tokens\": number,\n  \"tools\": ClaudeTool[],\n  \"messages\": ClaudeMessage[]\n};\n\ntype ClaudeResponse = {\n  \"id\": string,\n  \"type\": \"message\",\n  \"role\": \"assistant\",\n  \"model\": string,\n  \"stop_sequence\": null,\n  \"usage\": { \"input_tokens\": number, \"output_tokens\": number },\n  \"content\": string | ClaudeTextContent[] | ClaudeToolUseContent[] | ClaudeToolResultContent[];\n  \"stop_reason\": \"tool_use\" | \"stop_sequence\" | \"end_turn\"\n};\n",
+      "id": "1099f0d0-d9b6-4fe5-98b6-620d236c082b",
+      "label": "Claude Assistant",
+      "nodes": [],
+      "type": "script",
+      "name": "Claude Assistant",
       "dependencies": { "axios": "0.28.1" }
     },
     {
-      "type": "return",
-      "response": {
-        "200": {
-          "title": "",
-          "type": "object",
-          "buildship": { "index": 0 },
-          "properties": {
-            "data": {
-              "type": "object",
-              "title": "Data",
-              "description": "",
-              "buildship": { "index": 3 },
-              "properties": {}
-            },
-            "response": { "title": "Response", "description": "", "buildship": { "index": 0 }, "type": "string" },
-            "error": { "title": "Error", "buildship": { "index": 2 }, "description": "" },
-            "chatHistory": { "description": "", "buildship": { "index": 1 }, "type": "array", "title": "Chat History" }
-          },
-          "description": ""
-        }
-      },
       "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "label": "Return",
       "inputs": {
+        "type": "object",
+        "required": [],
         "properties": {
           "cacheMaxAge": {
-            "default": 0,
             "type": "number",
-            "buildship": { "index": 2 },
+            "title": "Cache Time",
             "description": "Set cache duration in seconds",
-            "title": "Cache Time"
-          },
-          "value": {
-            "buildship": { "index": 1 },
-            "description": "The value to return",
-            "type": "string",
-            "title": "Value",
-            "default": ""
+            "default": 0,
+            "buildship": { "index": 2 }
           },
           "status": {
-            "type": "string",
-            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "500"],
-            "title": "Status code",
+            "description": "The HTTP status code to return",
             "buildship": {
               "options": [
-                { "label": "OK (200)", "value": "200" },
+                { "value": "200", "label": "OK (200)" },
                 { "label": "Created (201)", "value": "201" },
                 { "value": "202", "label": "Accepted (202)" },
                 { "label": "Redirect (301)", "value": "301" },
-                { "label": "No Content (204)", "value": "204" },
+                { "value": "204", "label": "No Content (204)" },
                 { "value": "400", "label": "Bad Request (400)" },
                 { "value": "401", "label": "Unauthorized (401)" },
                 { "label": "Forbidden (403)", "value": "403" },
-                { "value": "404", "label": "Not Found (404)" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "value": "429", "label": "Too Many Requests (429)" },
                 { "value": "500", "label": "Internal Server Error (500)" }
               ],
               "index": 0
             },
-            "description": "The HTTP status code to return",
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
+            "title": "Status code",
+            "type": "string",
             "default": "200"
+          },
+          "value": {
+            "default": "",
+            "title": "Value",
+            "description": "The value to return",
+            "buildship": { "index": 1 },
+            "type": "string"
           }
-        },
-        "type": "object",
-        "required": []
+        }
       },
-      "label": "Return",
-      "id": "db0371b2-c091-4683-848b-fac9e4b016ca"
+      "response": { "2XX": { "type": "object", "properties": {} } },
+      "id": "5b4ceb39-4306-4b20-b09e-1da9b1080831",
+      "type": "return"
     }
   ],
   "trigger": {
-    "live": true,
     "request": {
       "properties": {
+        "body": {
+          "buildship": {},
+          "description": "Body of the request",
+          "type": "object",
+          "properties": {
+            "message": { "buildship": { "index": 0 }, "type": "string", "description": "", "title": "Message" },
+            "threadId": { "title": "Thread Id", "description": "", "type": "string", "buildship": { "index": 0 } }
+          },
+          "title": "Body"
+        },
         "headers": {
+          "buildship": {},
           "type": "object",
           "properties": {},
-          "title": "Request Headers",
-          "buildship": {},
-          "description": "Headers of the request"
-        },
-        "body": {
-          "description": "Body of the request",
-          "title": "Body",
-          "buildship": {},
-          "type": "object"
+          "description": "Headers of the request",
+          "title": "Request Headers"
         },
         "query": {
-          "type": "object",
-          "title": "Query",
           "buildship": {},
           "properties": {},
+          "title": "Query",
+          "type": "object",
           "description": "Query parameters"
         }
       },
-      "description": "",
-      "type": "object",
-      "title": "Request",
       "buildship": {},
-      "required": []
+      "required": [],
+      "title": "Request",
+      "type": "object"
     },
     "inputs": {
       "required": ["method", "path"],
       "properties": {
         "method": {
-          "enum": ["GET", "POST", "PUT", "DELETE"],
-          "pattern": "",
-          "description": "The HTTP method for the incoming request.",
-          "type": "string",
-          "default": "GET",
           "buildship": {
+            "sensitive": false,
+            "index": 1,
             "options": [
-              { "value": "GET", "label": "GET" },
+              { "label": "GET", "value": "GET" },
               { "value": "POST", "label": "POST" },
               { "value": "PUT", "label": "PUT" },
               { "label": "DELETE", "value": "DELETE" }
-            ],
-            "sensitive": false,
-            "index": 1
+            ]
           },
-          "title": "Method"
+          "title": "Method",
+          "default": "GET",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "description": "The HTTP method for the incoming request.",
+          "type": "string",
+          "pattern": ""
         },
         "path": {
-          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
-          "default": "/",
-          "type": "string",
-          "buildship": { "index": 0, "sensitive": false },
           "pattern": "",
-          "title": "Path"
+          "default": "/",
+          "title": "Path",
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "type": "string",
+          "buildship": { "sensitive": false, "index": 0 }
         }
       },
       "type": "object"
     },
-    "type": "http",
-    "dependencies": {},
-    "script": "",
-    "label": "Rest API Call",
+    "meta": {
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "id": "http",
+      "name": "Rest API Call",
+      "icon": {}
+    },
+    "groupId": null,
     "testingSchema": [
       {
-        "type": "shortText",
+        "disabled": true,
         "name": "endpointURL",
         "prefill": "endpointURL",
         "label": "Endpoint URL",
-        "disabled": true
+        "type": "shortText"
       },
-      { "name": "apiRequestData", "prefill": "apiRequestData", "type": "apiRequestData" }
+      { "prefill": "apiRequestData", "name": "apiRequestData", "type": "apiRequestData" }
     ],
-    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
-    "meta": {
-      "name": "Rest API Call",
-      "icon": {},
-      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
-      "id": "http"
-    },
+    "label": "Rest API Call",
     "output": {
       "type": "object",
+      "buildship": {},
       "properties": {
         "body": {
-          "title": "Body",
           "buildship": { "index": 1 },
+          "title": "Body",
           "type": "object",
           "description": "Body of the request"
         },
         "headers": {
-          "type": "object",
-          "title": "Headers",
-          "description": "Headers of the request",
           "properties": {
             "authorization": {
-              "title": "Authorization",
+              "buildship": { "index": 1 },
               "description": "Authorization header",
-              "type": "string",
-              "buildship": { "index": 1 }
+              "title": "Authorization",
+              "type": "string"
             },
             "content-type": {
-              "title": "Content-Type",
-              "type": "string",
               "description": "Content-Type of the request",
-              "buildship": { "index": 0 }
+              "buildship": { "index": 0 },
+              "type": "string",
+              "title": "Content-Type"
             }
           },
-          "buildship": {}
+          "description": "Headers of the request",
+          "buildship": {},
+          "type": "object",
+          "title": "Headers"
         },
         "query": {
-          "description": "Query parameters",
+          "title": "Query parameters",
           "type": "object",
           "buildship": { "index": 0 },
-          "title": "Query parameters"
+          "description": "Query parameters"
         }
       },
-      "buildship": {},
       "title": "Request"
     },
+    "live": true,
+    "dependencies": {},
+    "script": "",
+    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
+    "type": "http",
+    "order": 1,
     "id": "http"
   },
   "nodeValues": {
-    "http.path": "/",
-    "d76bc20e-855b-48bf-b209-fe32638329b6": { "message": { "keys": ["request"] } },
-    "1707150470569": { "arrays": { "keys": ["1707146970592", "thread_id"] } },
-    "1707146970592": {
-      "instructions": "",
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "apiKey": { "secretName": "openai" },
-      "prompt": { "type": "javascript", "expression": "ctx[\"root\"][\"request\"][\"body\"].message" },
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadID", "type": "javascript" }
-    },
-    "1707148570211": { "message": "hi!" },
-    "1707214100658": { "status": "200", "cacheMaxAge": 0, "value": { "keys": ["1707213620392"] } },
-    "test-node-3532379d-21ef-456c-859c-6669d5adb63a": {
-      "assistantId": "asst_OadB242bbzmqSmFFmfGH0Fbd",
-      "apiKey": { "secretName": "openai" },
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time"
-    },
-    "test-node-9b1bb3ab-0d54-41ab-b956-4fe1c188da5a": {
-      "maxTokens": 1024,
-      "chatHistory": [],
-      "model": "claude-3-opus-20240229",
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time",
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "userPrompt": ""
-    },
-    "1707150378857": { "message": { "keys": ["1707150470569"] } },
-    "db0371b2-c091-4683-848b-fac9e4b016ca": {
-      "status": "200",
-      "cacheMaxAge": 0,
-      "value": { "keys": ["de9857cb-7e16-4232-96c1-fdbdbc37a726"] }
-    },
-    "1707147058032.status": "200",
-    "1707147074844": {
-      "value": { "keys": ["1707147032929", "else", "80047921-4167-4a56-a867-b8a130ea4ead", "content"] },
+    "5b4ceb39-4306-4b20-b09e-1da9b1080831": {
+      "value": {
+        "expression": "{\n  \"message\": ctx[\"root\"][\"1099f0d0-d9b6-4fe5-98b6-620d236c082b\"][\"response\"],\n  \"threadId\": \"\"\n}",
+        "type": "javascript"
+      },
       "cacheMaxAge": 0,
       "status": "200"
     },
-    "test-node-1707147251709": { "jsonValue": { "threadID": 231312 } },
-    "de9857cb-7e16-4232-96c1-fdbdbc37a726": {
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time",
+    "062e04f3-0751-4839-9598-3bd61a18f415": {
+      "maxTokens": 1024,
+      "threadId": { "keys": ["request", "body", "threadId"] },
       "model": "claude-3-haiku-20240307",
-      "maxTokens": 1024,
-      "chatHistory": {
-        "type": "javascript",
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].chatHistory",
-        "hasErrors": false
-      },
-      "userPrompt": {
-        "hasErrors": false,
-        "expression": "ctx[\"root\"][\"request\"][\"body\"].message",
-        "type": "javascript"
-      }
-    },
-    "1707212984350": { "status": "200", "value": { "keys": ["1707146970592", "content"] }, "cacheMaxAge": 0 },
-    "7a80191e-9e3c-4a60-9ed5-331c94ff47ba": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "21784109-d5b0-455e-81bf-0a0380964487": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "be5e9167-d80b-4aa2-aa62-3d529c0d2bdc": {
-      "collectionName": "discovery",
-      "data": {
-        "expression": "{\"elementA\":`${ctx[\"root\"][\"request\"][\"body\"].elementA}`,\n \"elementB\":`${ctx[\"root\"][\"request\"][\"body\"].elementB}`,\n  \"result\":`${ctx[\"root\"][\"1706807729706\"][\"else\"][\"1706804529791\"][\"output\"]}`\n}"
-      },
-      "merge": false
-    },
-    "711d38d9-6032-4688-943a-1d4b29f12254": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "1707147058032.cacheMaxAge": 0,
-    "80047921-4167-4a56-a867-b8a130ea4ead": {
-      "apiKey": { "secretName": "openai" },
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadID" },
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "prompt": { "expression": "ctx[\"root\"][\"request\"][\"body\"].message", "type": "javascript" }
-    },
-    "9b1bb3ab-0d54-41ab-b956-4fe1c188da5a": {
-      "model": "claude-3-opus-20240229",
       "userPrompt": { "keys": ["request", "body", "message"] },
-      "maxTokens": 1024,
-      "chatHistory": { "expression": "[]", "type": "javascript" },
-      "claudeApiKey": { "secretName": "claude-harini" },
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time"
+      "systemPrompt": "",
+      "claudeApiKey": ""
     },
-    "1707147058032.value": "",
-    "1707213620392": {
-      "prompt": { "expression": "ctx[\"root\"][\"request\"][\"body\"].message", "type": "javascript" },
-      "assistantId": "asst_OadB242bbzmqSmFFmfGH0Fbd",
-      "apiKey": { "secretName": "OpenAI" },
-      "threadId": { "expression": "ctx[\"root\"][\"request\"][\"body\"].threadId" },
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time"
-    },
-    "http.method": "GET",
-    "test-node-1707146970592": {
-      "threadId": "",
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "apiKey": { "secretName": "openai" },
-      "prompt": "tell a joke"
-    },
-    "1707147058032": {
+    "http": { "method": "POST", "path": "/claude-city-advisor" },
+    "b0f5b70e-1dec-46c6-811d-8d56325883b6": {
+      "cacheMaxAge": 0,
       "value": {
         "type": "javascript",
-        "expression": "{\n  \"message\": ctx[\"root\"][\"f2dd11fd-6ad9-4fec-92ee-811fc7981783\"][\"response\"],\n  \"threadId\":ctx[\"root\"][\"f2dd11fd-6ad9-4fec-92ee-811fc7981783\"][\"threadId\"]\n}"
+        "expression": "{\n  \"message\": ctx[\"root\"][\"1099f0d0-d9b6-4fe5-98b6-620d236c082b\"][\"response\"],\n  \"threadId\": \"\"\n}"
       },
-      "cacheMaxAge": 0,
       "status": "200"
     },
-    "b7f08140-9987-40da-b764-ecc8a1dd372a": {
-      "data": {
-        "expression": "{\"threadid\":`${ctx[\"root\"][\"1707147032929\"][\"else\"][\"80047921-4167-4a56-a867-b8a130ea4ead\"][\"thread_id\"]}`,\n \"message\":`${ctx[\"root\"][\"request\"][\"body\"].elementB}`\n}"
-      },
-      "collectionName": "chatHistory",
-      "merge": false
-    },
-    "1707147032929": { "condition": { "keys": ["1707147251709"] } },
-    "1707149353632": { "arrays": { "keys": ["1707146970592", "content"] } },
-    "3532379d-21ef-456c-859c-6669d5adb63a": {
-      "apiKey": { "secretName": "openai" },
-      "prompt": { "keys": ["request", "body", "message"] },
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time",
-      "threadId": { "keys": ["request", "body", "threadId"] },
-      "assistantId": "asst_OadB242bbzmqSmFFmfGH0Fbd"
-    },
-    "test-node-1707213620392": {
-      "apiKey": { "secretName": "openai" },
-      "assistantId": "asst_acECoLHoxI0sOFgUGMqZgPcI",
-      "prompt": "tell a joke",
-      "instructions": "You are a personal history tutor. You will answer questions in a concise way. If no question is given, you should provide a historical fact. You must also engage with users by creating little quizzes with 4 possible options to answer in each question"
-    },
-    "1707214066762": { "message": { "keys": ["1707213620392"] } },
-    "787e13a1-4545-4e69-b036-b9be4fc190f0": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "1707147251709": { "jsonValue": { "keys": ["request", "body"] } },
-    "http": { "method": "POST", "path": "/claude-city_advisor" },
-    "e04dda30-9db1-42ba-b593-b20bed376c38": {
-      "merge": false,
-      "data": {
-        "expression": "{\"elementA\":`${ctx[\"root\"][\"request\"][\"body\"].elementA}`,\n \"elementB\":`${ctx[\"root\"][\"request\"][\"body\"].elementB}`,\n  \"result\":`${ctx[\"root\"][\"1706807729706\"][\"else\"][\"1706804529791\"][\"output\"]}`\n}"
-      },
-      "collectionName": "discovery"
-    },
-    "f2dd11fd-6ad9-4fec-92ee-811fc7981783": {
-      "assistantId": "asst_OadB242bbzmqSmFFmfGH0Fbd",
-      "apiKey": { "secretName": "OpenAI" },
-      "threadId": { "keys": ["request", "body", "threadId"] },
-      "prompt": { "keys": ["request", "body", "message"] },
-      "instructions": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time"
-    },
-    "dd6e792c-c445-4aaf-9fff-0ef01371ad7b": { "message": { "expression": "ctx[\"root\"][\"request\"]" } },
-    "c58cb632-5f48-4e2e-99dc-5b5515be778e": { "message": { "expression": "ctx[\"root\"][\"request\"]" } }
+    "1099f0d0-d9b6-4fe5-98b6-620d236c082b": {
+      "maxTokens": 1024,
+      "claudeApiKey": "",
+      "model": "claude-3-haiku-20240307",
+      "userPrompt": { "keys": ["request", "body", "message"] },
+      "systemPrompt": "You are a city advisor, user will ask you for different city plans and you should respond based on their preferences. You can ask follow-up questions to better understand which are these preferences. You should give a summary of 3 events that someone can attend. Including the event title, link, date time",
+      "threadId": { "keys": ["request", "body", "threadId"] }
+    }
   },
-  "notes": "<p>An assistant that gives you plans for travel in a city. Try it using this test request body:</p><p><br></p><p>{</p><p>\"message\":\"Plans for Sydney for 2 days\"</p><p>}</p><p><br></p><p>Short Video: <a href=\"https://www.youtube.com/watch?v=OiQJQMk_2mo\" rel=\"noopener noreferrer\" target=\"_blank\">youtube.com/watch?v=OiQJQMk_2mo</a></p><p>Documentation: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-i-chat-with-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">docs.buildship.com/ai-models/assistant</a></p>"
+  "notes": "<p>An assistant that gives you plans for travel in a city. Try it using this test request body:</p><p><br></p><p>{</p><p>\"message\":\"Plans for Sydney for 2 days \"</p><p>}</p><p><br></p><p>Short Video: <a href=\"https://www.youtube.com/watch?v=OiQJQMk_2mo\" rel=\"noopener noreferrer\" target=\"_blank\">youtube.com/watch?v=OiQJQMk_2mo</a></p><p>Documentation: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-i-chat-with-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">docs.buildship.com/ai-models/assistant</a></p>"
 }
