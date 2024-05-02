@@ -70,9 +70,6 @@ export default async function assistant(
     logging.log(`Claude response(${requestCount}): `, response.data);
 
     do {
-      if (response.status !== 200) {
-        throw response.error;
-      }
       if (response.data.type === "error") {
           throw response.data.error;
       }

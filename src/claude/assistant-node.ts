@@ -1,9 +1,5 @@
 import axios from "axios";
 
-import { ClaudeTool, ClaudeRequest, ClaudeResponse, ClaudeMessage, ClaudeToolResultContent } from "./types";
-import { Node } from "../types";
-import beautify from "json-beautify";
-
 const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
   return {
     // Use node.id as the name of the tool. Spaces are not allowed.
@@ -22,15 +18,26 @@ const nodeToClaudeTool: (node: Node) => ClaudeTool = (node) => {
             }
           }
         }, {}),
-      required: node.inputs.required ?? [],
+      required: Object.entries(node.inputs.properties).map(([name, value]) => {
+        if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;
+        return false;
+      }).filter(Boolean) as string[],
     },
   };
 }
 
+type Params = {
+  claudeApiKey: string;
+  model: string;
+  maxTokens: number;
+  userPrompt: string;
+  systemPrompt?: string;
+  chatHistory?: ClaudeMessage[];
+};
+
 export default async function assistant(
-  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, messageHistory }:
-    { claudeApiKey: string, model: string, maxTokens: number, userPrompt: string, systemPrompt?: string, messageHistory?: ClaudeMessage[] },
-  { logging, execute, nodes }: { logging: any, execute: any, nodes: Node[] }
+  { claudeApiKey, model, maxTokens, userPrompt, systemPrompt, chatHistory }: Params,
+  { logging, execute, nodes }: any
 ) {
   const version = "2023-06-01";
   const beta = "tools-2024-04-04";
@@ -46,14 +53,10 @@ export default async function assistant(
     }
   });
 
-  const tools = nodes?.map(nodeToClaudeTool) ?? [];
-
-  console.log("***");
-  console.log("Tools:", beautify(tools, null as any, 2, 80));
-  console.log("***");
+  const tools: ClaudeTool[] = nodes?.map(nodeToClaudeTool) ?? [];
 
   const initialMessages = [
-    ...(messageHistory ?? []),
+    ...(chatHistory ?? []),
     {
       "role": "user",
       "content": userPrompt,
@@ -69,23 +72,22 @@ export default async function assistant(
 
   try {
     let request = { ...baseRequest };
+    let requestCount = 1;
+    logging.log(`Claude request(${requestCount}):`, baseRequest);
     let response = await client.post("/messages", request);
+    logging.log(`Claude response(${requestCount}): `, response.data);
 
     do {
-      if (response.status !== 200) {
-        if (response.data.type === "error") {
-          throw response.data.error;
-        }
-        throw response;
+      if (response.data.type === "error") {
+        throw response.data.error;
       }
 
-      console.log("***");
-      console.log("Response:", beautify(response.data, null as any, 2, 80));
-      console.log("***");
+      let result = response.data;
 
-      let result = response.data as ClaudeResponse;
+      const isEndTurn = result.stop_reason === "end_turn";
+      if (isEndTurn) break;
+
       const content = result.content;
-
       request.messages.push({ role: "assistant", content });
 
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
@@ -97,7 +99,7 @@ export default async function assistant(
         const toolUses = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {
           const tool = tools.find(tool => tool.name === toolUse.name);
-          const node = nodes?.find(node => node.id === toolUse.name);
+          const node = nodes?.find((node: Node) => node.id === toolUse.name) as Node | undefined;
           if (!tool || !node) {
             throw new Error(`Unknown tool: ${toolUse}`);
           }
@@ -110,12 +112,125 @@ export default async function assistant(
         }
         request.messages.push(toolUseMessage);
       }
+      if (isToolUse) {
+        const toolUseMessageContent = [] as ClaudeToolResultContent[];
+
+        const toolUses = content.filter(content => content.type === "tool_use");
+        for (const toolUse of toolUses) {
+          const tool = tools.find(tool => tool.name === toolUse.name);
+          const node = nodes?.find((node: Node) => node.id === toolUse.name);
+          if (!tool || !node) {
+            logging.log("Failed to find tool:");
+            logging.log(toolUse);
+            logging.log(node);
+            throw new Error("Failed to find tool");
+          }
+          logging.log("Tool node: ", node.name);
+          const toolResponse = await execute(node.label, toolUse.input);
+          logging.log("Tool response: ", toolResponse);
+          toolUseMessageContent.push({
+            type: "tool_result",
+            tool_use_id: toolUse.id,
+            content: toolResponse ? JSON.stringify(toolResponse) : "",
+          });
+        }
+        request.messages.push({
+          role: "user",
+          content: toolUseMessageContent
+        });
+      }
+      requestCount++;
+      logging.log(`Claude request(${requestCount}):`, request);
       response = await client.post("/messages", request);
+      logging.log(`Claude response(${requestCount}): `, response.data);
     } while (response && response.data && response.data.stop_reason !== "end_turn");
-    const messageHistory = [...request.messages, { role: "assistant", content: response.data.content }]
-    return { data: { ...response.data, messageHistory } };
+
+    return {
+      response: response.data.content[0].text,
+      chatHistory: [...request.messages, { role: "assistant", content: response.data.content }],
+      data: response.data,
+      error: null,
+    }
   } catch (error) {
     logging.log(`Error: ${error}`);
     return { error }
   }
 }
+
+type Node = {
+  label: string;
+  meta: {
+    id: string;
+    description: string;
+    name: string;
+    [key: string]: any;
+  };
+  inputs: {
+    type: string;
+    required: string[];
+    properties: Record<string, {
+      description: string;
+      buildship?: {
+        toBeAutoFilled?: boolean;
+        [key: string]: any;
+      }
+      [key: string]: any;
+    }>;
+  };
+  [key: string]: any;
+};
+
+type ClaudeTool = {
+  name: string;
+  description: string;
+  input_schema: {
+    type: string;
+    properties: Record<string, {
+      type: string;
+      description: string;
+      enum?: string[];
+    }>;
+    required: string[];
+  };
+};
+
+type ClaudeTextContent = {
+  type: "text";
+  text: string;
+};
+
+type ClaudeToolUseContent = {
+  type: "tool_use",
+  id: string,
+  name: string,
+  input: Record<string, string>
+};
+
+type ClaudeToolResultContent = {
+  type: "tool_result",
+  tool_use_id: string,
+  content: string
+};
+
+type ClaudeMessage = {
+  role: "user" | "assistant",
+  content: ClaudeResponse["content"]
+};
+
+type ClaudeRequest = {
+  "model": string,
+  "max_tokens": number,
+  "tools": ClaudeTool[],
+  "messages": ClaudeMessage[]
+};
+
+type ClaudeResponse = {
+  "id": string,
+  "type": "message",
+  "role": "assistant",
+  "model": string,
+  "stop_sequence": null,
+  "usage": { "input_tokens": number, "output_tokens": number },
+  "content": string | ClaudeTextContent[] | ClaudeToolUseContent[] | ClaudeToolResultContent[];
+  "stop_reason": "tool_use" | "stop_sequence" | "end_turn"
+};
