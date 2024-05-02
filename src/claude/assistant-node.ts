@@ -92,30 +92,9 @@ export default async function assistant(
 
       const isToolUse = result.stop_reason === "tool_use" && content instanceof Array;
       if (isToolUse) {
-        const toolUseMessage = {
-          role: "user" as ClaudeMessage["role"],
-          content: [] as ClaudeToolResultContent[]
-        };
-        const toolUses = content.filter(content => content.type === "tool_use");
-        for (const toolUse of toolUses) {
-          const tool = tools.find(tool => tool.name === toolUse.name);
-          const node = nodes?.find((node: Node) => node.id === toolUse.name) as Node | undefined;
-          if (!tool || !node) {
-            throw new Error(`Unknown tool: ${toolUse}`);
-          }
-          toolUseMessage.content.push({
-            type: "tool_result",
-            tool_use_id: toolUse.id,
-            // use empty string as default content
-            content: await execute(node.label, toolUse.input) ?? ""
-          });
-        }
-        request.messages.push(toolUseMessage);
-      }
-      if (isToolUse) {
         const toolUseMessageContent = [] as ClaudeToolResultContent[];
 
-        const toolUses = content.filter(content => content.type === "tool_use");
+        const toolUses: ClaudeToolUseContent[] = content.filter(content => content.type === "tool_use");
         for (const toolUse of toolUses) {
           const tool = tools.find(tool => tool.name === toolUse.name);
           const node = nodes?.find((node: Node) => node.id === toolUse.name);
@@ -126,7 +105,16 @@ export default async function assistant(
             throw new Error("Failed to find tool");
           }
           logging.log("Tool node: ", node.name);
-          const toolResponse = await execute(node.label, toolUse.input);
+          // filter hallucinated inputs
+          const inputs = {} as Record<string, string>;
+          for (const [inputKey, inputValue] of Object.entries(toolUse.input)) {
+            if (node.inputs.properties[inputKey]) {
+              inputs[inputKey] = inputValue;
+            } else {
+              logging.log("Hallucinated input: ", inputKey, inputValue);
+            }
+          }
+          const toolResponse = await execute(node.label, inputs);
           logging.log("Tool response: ", toolResponse);
           toolUseMessageContent.push({
             type: "tool_result",
