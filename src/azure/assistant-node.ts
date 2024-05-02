@@ -33,7 +33,7 @@ const nodeToOpenAiFunction: (node: Node) => ToolDefinition = (node) => {
 const sleep: (ms: number) => Promise<any> = (ms) =>
   new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));
 
-type Params {
+type Params = {
   azureApiKey: string;
   resource: string;
   assistantId: string;

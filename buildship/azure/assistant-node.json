@@ -1,36 +1,27 @@
 [
   {
+    "id": "60accd2b-d248-4e70-bfe2-1483d0484615",
+    "nodes": [],
+    "type": "script",
+    "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input. once it has completed the request, it will return its response as output message. [Full Documentation](https://docs.buildship.com/core-nodes/openai-assistant).",
     "output": {
-      "description": "",
       "title": "Assistant Response",
-      "buildship": {
-        "index": 0
-      },
-      "type": "object",
       "properties": {
-        "response": {
-          "description": "",
-          "type": "string",
-          "title": "Response",
-          "buildship": {
-            "index": 2
-          }
-        },
         "annotations": {
-          "description": "The annotations of the message",
-          "type": "array",
           "buildship": {
             "index": 3
           },
+          "type": "array",
+          "description": "The annotations of the message",
           "title": "Annotations"
         },
-        "threadId": {
-          "description": "The thread ID that this message belongs to.",
-          "buildship": {
-            "index": 1
-          },
+        "response": {
           "type": "string",
-          "title": "Thread ID"
+          "buildship": {
+            "index": 2
+          },
+          "title": "Response",
+          "description": ""
         },
         "messages": {
           "buildship": {
@@ -39,72 +30,102 @@
           "type": "array",
           "title": "Messages",
           "description": "The content of the message in array of text and/or images."
-        }
-      }
-    },
-    "inputs": {
-      "properties": {
-        "userPrompt": {
-          "default": "",
-          "description": "The prompt to send to the assistant as user message.\n",
-          "pattern": "",
-          "title": "User prompt",
-          "buildship": {
-            "index": 6,
-            "sensitive": false
-          },
-          "type": "string"
         },
-        "resource": {
-          "buildship": {
-            "index": 2,
-            "sensitive": false,
-            "hidden": false
-          },
-          "pattern": "",
+        "threadId": {
           "type": "string",
-          "description": "The name of your Azure resource.",
-          "title": "Resource"
+          "description": "The thread ID that this message belongs to.",
+          "title": "Thread ID",
+          "buildship": {
+            "index": 1
+          }
+        }
+      },
+      "description": "",
+      "buildship": {
+        "index": 0
+      },
+      "type": "object"
+    },
+    "meta": {
+      "name": "Azure OpenAI Assistant",
+      "icon": {
+        "url": "https://www.svgrepo.com/show/448274/azure.svg",
+        "type": "URL"
+      },
+      "id": "azure-openai-assistant-node",
+      "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input."
+    },
+    "name": "Azure OpenAI Assistant",
+    "script": "import { AssistantsClient } from \"@azure/openai-assistants\";\nimport { AzureKeyCredential } from \"@azure/openai\";\nimport { setTimeout } from \"timers/promises\";\n\nconst nodeToOpenAiFunction = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: node.id,\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\nconst sleep = (ms) =>\n  new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));\n\nexport default async function assistant(\n  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },\n  { logging, execute, nodes }\n) {\n  const tools = nodes?.map(nodeToOpenAiFunction) ?? [];\n\n  const endpoint = `https://${resource}.openai.azure.com`;\n  const credentials = new AzureKeyCredential(azureApiKey);\n  const assistantsClient = new AssistantsClient(endpoint, credentials);\n\n  const messages = [{ role: \"user\", content: userPrompt }];\n\n  if (threadId) {\n    await assistantsClient.createMessage(threadId, \"user\", userPrompt);\n  } else {\n    threadId = (await assistantsClient.createThread({ messages })).id;\n    logging.log(\"New thread created with ID:\", threadId);\n  }\n\n  // Retrieval tool isn't supported in Azure yet\n  // builtInTools.includes(\"retrieval\") && tools.push({ type: \"retrieval\" });\n  builtInTools.includes(\"code_interpreter\") && tools.push({ type: \"code_interpreter\" });\n\n  let runResponse = await assistantsClient.createRun(threadId, {\n    assistantId,\n    instructions,\n    tools,\n  });\n\n  do {\n    await sleep(1000);\n    runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);\n\n    const isToolUse = runResponse.status === \"requires_action\" && runResponse.requiredAction?.type === \"submit_tool_outputs\";\n    if (isToolUse) {\n      const toolOutputs = [];\n      const toolUses = runResponse.requiredAction?.submitToolOutputs?.toolCalls || [];\n      for (const toolUse of toolUses) {\n        let args;\n        try {\n          args = JSON.parse(toolUse.function.arguments);\n          logging.log(args);\n        } catch (err) {\n          logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);\n          throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)\n        }\n        const node = nodes?.find(node => node.id === toolUse.function.name);\n        if (!node) {\n          throw new Error(`Unknown tool: ${toolUse.function.name}`);\n        }\n        const toolOutput = await execute(node.label, args);\n\n        logging.log(toolOutput);\n        toolOutputs.push({\n          toolCallId: toolUse.id,\n          output: toolOutput ? JSON.stringify(toolOutput) : \"\"\n        });\n        logging.log(\n          `Executed ${node.label} with output:`,\n          toolOutput\n        );\n      }\n      runResponse = await assistantsClient.submitToolOutputsToRun(runResponse.threadId, runResponse.id, toolOutputs);\n    }\n  } while (runResponse.status === \"queued\" || runResponse.status === \"in_progress\")\n\n  const { data } = await assistantsClient.listMessages(runResponse.threadId, { order: \"desc\" });\n\n  const resultMessage = data[0];\n\n  if (resultMessage.content[0].type === \"text\") {\n    return {\n      \"response\": resultMessage.content[0].text.value,\n      \"annotations\": resultMessage.content[0].text.annotations,\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n\n  if (resultMessage.content[0].type === \"image_file\") {\n    return {\n      \"response\": \"\",\n      \"imageFileId\": resultMessage.content[0].imageFile.fileId,\n      \"annotations\": [],\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n}",
+    "subType": "assistant",
+    "onFail": null,
+    "label": "Azure OpenAI Assistant",
+    "inputs": {
+      "type": "object",
+      "required": ["userPrompt", "resource", "assistantId", "azureApiKey"],
+      "properties": {
+        "assistantId": {
+          "title": "Assistant ID",
+          "buildship": {
+            "sensitive": false,
+            "index": 1
+          },
+          "description": "The ID of the assistant to use. You need to create the assistant in the Azure OpenAI Studio.",
+          "pattern": "",
+          "type": "string"
         },
         "threadId": {
           "title": "Thread ID",
+          "description": "The ID of the conversation thread to use. If not specified, a new thread will be created.",
           "type": "string",
           "buildship": {
             "index": 4
-          },
-          "description": "The ID of the conversation thread to use. If not specified, a new thread will be created."
+          }
         },
         "azureApiKey": {
+          "title": "Azure API key",
           "description": "The Azure API key to use for authentication.",
           "pattern": "",
           "type": "string",
           "buildship": {
             "sensitive": false,
             "index": 0
+          }
+        },
+        "resource": {
+          "pattern": "",
+          "buildship": {
+            "index": 2,
+            "hidden": false,
+            "sensitive": false
           },
-          "title": "Azure API key"
+          "title": "Resource",
+          "description": "The name of your Azure resource.",
+          "type": "string"
+        },
+        "userPrompt": {
+          "buildship": {
+            "sensitive": false,
+            "index": 6
+          },
+          "default": "",
+          "description": "The prompt to send to the assistant as user message.\n",
+          "type": "string",
+          "pattern": "",
+          "title": "User prompt"
         },
         "instructions": {
-          "type": "string",
+          "title": "Instructions",
           "buildship": {
             "index": 5
           },
-          "description": "Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis.",
-          "title": "Instructions"
-        },
-        "assistantId": {
-          "description": "The ID of the assistant to use. You need to create the assistant in the Azure OpenAI Studio.",
           "type": "string",
-          "title": "Assistant ID",
-          "buildship": {
-            "index": 1,
-            "sensitive": false
-          },
-          "pattern": ""
+          "description": "Override the default system message of the assistant. This is useful for modifying the behavior on a per-run basis."
         },
         "builtInTools": {
-          "type": "array",
+          "enum": ["retrieval", "code_interpreter"],
           "description": "Select the OpenAI assistant built-in tools to use.",
+          "type": "array",
           "buildship": {
             "options": [
               {
@@ -112,114 +133,27 @@
                 "value": "retrieval"
               },
               {
-                "label": "Code Interpreter",
-                "value": "code_interpreter"
+                "value": "code_interpreter",
+                "label": "Code Interpreter"
               }
             ],
             "index": 6
           },
-          "enum": ["retrieval", "code_interpreter"],
           "title": "Built-in Tools"
         }
-      },
-      "type": "object",
-      "required": ["userPrompt", "resource", "assistantId", "azureApiKey"]
-    },
-    "meta": {
-      "name": "Azure OpenAI Assistant",
-      "id": "azure-openai-assistant-node",
-      "icon": {
-        "url": "https://www.svgrepo.com/show/448274/azure.svg",
-        "type": "URL"
-      },
-      "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input."
-    },
-    "script": "import { AssistantsClient } from \"@azure/openai-assistants\";\nimport { AzureKeyCredential } from \"@azure/openai\";\nimport { setTimeout } from \"timers/promises\";\n\nconst nodeToOpenAiFunction = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: node.id,\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\nconst sleep = (ms) =>\n  new Promise((resolve) => setTimeout(ms).then(() => resolve(true)));\n\nexport default async function assistant(\n  { azureApiKey, resource, assistantId, threadId, userPrompt, builtInTools = [], instructions },\n  { logging, execute, nodes }\n) {\n  const tools = nodes?.map(nodeToOpenAiFunction) ?? [];\n\n  const endpoint = `https://${resource}.openai.azure.com`;\n  const credentials = new AzureKeyCredential(azureApiKey);\n  const assistantsClient = new AssistantsClient(endpoint, credentials);\n\n  const messages = [{ role: \"user\", content: userPrompt }];\n\n  if (threadId) {\n    await assistantsClient.createMessage(threadId, \"user\", userPrompt);\n  } else {\n    threadId = (await assistantsClient.createThread({ messages })).id;\n    logging.log(\"New thread created with ID:\", threadId);\n  }\n\n  // Retrieval tool isn't supported in Azure yet\n  // builtInTools.includes(\"retrieval\") && tools.push({ type: \"retrieval\" });\n  builtInTools.includes(\"code_interpreter\") && tools.push({ type: \"code_interpreter\" });\n\n  let runResponse = await assistantsClient.createRun(threadId, {\n    assistantId,\n    instructions,\n    tools,\n  });\n\n  do {\n    await sleep(1000);\n    runResponse = await assistantsClient.getRun(runResponse.threadId, runResponse.id);\n\n    const isToolUse = runResponse.status === \"requires_action\" && runResponse.requiredAction?.type === \"submit_tool_outputs\";\n    if (isToolUse) {\n      const toolOutputs = [];\n      const toolUses = runResponse.requiredAction?.submitToolOutputs?.toolCalls || [];\n      for (const toolUse of toolUses) {\n        let args;\n        try {\n          args = JSON.parse(toolUse.function.arguments);\n          logging.log(args);\n        } catch (err) {\n          logging.log(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`);\n          throw new Error(`Couldn't parse function arguments. Received: ${toolUse.function.arguments}`)\n        }\n        const node = nodes?.find(node => node.id === toolUse.function.name);\n        if (!node) {\n          throw new Error(`Unknown tool: ${toolUse.function.name}`);\n        }\n        const toolOutput = await execute(node.label, args);\n\n        logging.log(toolOutput);\n        toolOutputs.push({\n          toolCallId: toolUse.id,\n          output: toolOutput ? JSON.stringify(toolOutput) : \"\"\n        });\n        logging.log(\n          `Executed ${node.label} with output:`,\n          toolOutput\n        );\n      }\n      runResponse = await assistantsClient.submitToolOutputsToRun(runResponse.threadId, runResponse.id, toolOutputs);\n    }\n  } while (runResponse.status === \"queued\" || runResponse.status === \"in_progress\")\n\n  const { data } = await assistantsClient.listMessages(runResponse.threadId, { order: \"desc\" });\n\n  const resultMessage = data[0];\n\n  if (resultMessage.content[0].type === \"text\") {\n    return {\n      \"response\": resultMessage.content[0].text.value,\n      \"annotations\": resultMessage.content[0].text.annotations,\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n\n  if (resultMessage.content[0].type === \"image_file\") {\n    return {\n      \"response\": \"\",\n      \"imageFileId\": resultMessage.content[0].imageFile.fileId,\n      \"annotations\": [],\n      \"threadId\": runResponse.threadId,\n      \"messages\": data\n    };\n  }\n}",
-    "nodes": [
-      {
-        "label": "get website",
-        "script": "import axios from \"axios\";\nimport cheerio from \"cheerio\";\n\nexport default async function scrapeUrl({ url, selector }) {\n  const { data } = await axios.get(url);\n\n  const $ = cheerio.load(data);\n\n  $(\"script\").remove();\n\n  const content = $(selector).text().replace(/\\n/g, \"\");\n\n  return { content }\n}",
-        "name": "get website",
-        "id": "99dfb1f5-56b6-44da-b274-8b5e076ff45b",
-        "type": "script",
-        "inputs": {
-          "type": "object",
-          "properties": {
-            "url": {
-              "title": "URL",
-              "default": "",
-              "buildship": {
-                "sensitive": false,
-                "index": 0,
-                "toBeAutoFilled": true
-              },
-              "type": "string",
-              "description": "The url to scrape.",
-              "pattern": ""
-            },
-            "selector": {
-              "default": "body",
-              "description": "A valid HTML selector.",
-              "pattern": "",
-              "buildship": {
-                "sensitive": false,
-                "index": 1
-              },
-              "title": "Selector",
-              "type": "string"
-            }
-          },
-          "required": ["url", "selector"]
-        },
-        "_libRef": {
-          "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/scrape-web-url/1.0.0.cjs",
-          "libNodeRefId": "@buildship/scrape-web-url",
-          "isDirty": true,
-          "libType": "public",
-          "version": "1.0.0",
-          "integrity": "v3:83c1c98b54e96bb03b6b641e1f9a3d6c"
-        },
-        "output": {
-          "title": "Scrape Web URL",
-          "properties": {},
-          "type": "object",
-          "buildship": {}
-        },
-        "integrations": [],
-        "onFail": null,
-        "meta": {
-          "description": "Scrape a given web url and return the text content",
-          "icon": {
-            "svg": "<path d=\"M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.11-.9-2-2-2H4c-1.11 0-2 .89-2 2v10c0 1.1.89 2 2 2H0v2h24v-2h-4ZM4 16V6h16v10.01L4 16Zm5.0967-6.0469c0-1.027.836-1.864 1.864-1.864 1.027 0 1.864.837 1.864 1.864 0 1.027-.837 1.864-1.864 1.864-1.028 0-1.864-.837-1.864-1.864Zm7.032 4.236-2.482-2.482c.331-.505.527-1.107.527-1.754 0-1.772-1.441-3.213-3.213-3.213s-3.214 1.441-3.214 3.213 1.442 3.214 3.214 3.214c.636 0 1.225-.192 1.724-.511l2.489 2.488.955-.955Z\"></path>",
-            "type": "SVG"
-          },
-          "name": "get website",
-          "id": "scrape-web-url"
-        },
-        "dependencies": {
-          "axios": "1.6.2",
-          "cheerio": "1.0.0-rc.12"
-        }
       }
-    ],
-    "label": "Azure OpenAI Assistant",
-    "subType": "assistant",
-    "onFail": null,
-    "name": "Azure OpenAI Assistant",
-    "description": "Add different script nodes and let the OpenAI assistant automatically choose which to execute based on the input. once it has completed the request, it will return its response as output message. [Full Documentation](https://docs.buildship.com/core-nodes/openai-assistant).",
-    "type": "script",
-    "id": "fd566d83-3fdf-435c-9b7a-a36a1544c05c",
+    },
     "values": {
-      "userPrompt": {
-        "keys": ["request", "body", "message"]
-      },
-      "resource": "",
+      "assistantId": "",
       "threadId": {
         "keys": ["request", "body", "threadId"]
       },
       "azureApiKey": "",
-      "instructions": "",
-      "assistantId": ""
+      "resource": "",
+      "userPrompt": {
+        "keys": ["request", "body", "message"]
+      },
+      "instructions": ""
     }
   }
 ]
