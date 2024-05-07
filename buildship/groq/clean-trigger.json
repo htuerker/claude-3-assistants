@@ -1,0 +1,308 @@
+{
+  "nodes": [
+    {
+      "output": {
+        "buildship": { "index": 0 },
+        "properties": {
+          "threadId": { "title": "Thread Id", "buildship": { "index": 1 }, "description": "", "type": "string" },
+          "message": { "title": "Message", "buildship": { "index": 0 }, "description": "", "type": "string" },
+          "data": { "description": "", "type": "string", "buildship": { "index": 2 }, "title": "Data" }
+        },
+        "title": "",
+        "type": "object",
+        "description": ""
+      },
+      "meta": {
+        "description": "",
+        "icon": {
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fgroq.png?alt=media&token=7f60edf7-f402-4762-8334-00cb2981cef0",
+          "type": "URL"
+        },
+        "name": "Groq Assistant",
+        "id": "groq-assistant-node"
+      },
+      "id": "62979cb6-d40c-45ef-bb6f-e48946447427",
+      "onFail": null,
+      "dependencies": { "lodash": "4.17.21", "groq-sdk": "0.3.3" },
+      "inputs": {
+        "properties": {
+          "groqApiKey": {
+            "pattern": "",
+            "description": "",
+            "buildship": { "sensitive": true, "index": 0 },
+            "title": "API Key",
+            "type": "string"
+          },
+          "systemPrompt": {
+            "title": "Instructions",
+            "buildship": { "sensitive": false, "index": 1 },
+            "type": "string",
+            "description": "",
+            "pattern": "",
+            "default": ""
+          },
+          "maxTokens": {
+            "type": "number",
+            "default": "",
+            "title": "Max Tokens",
+            "description": "",
+            "buildship": { "index": 4, "sensitive": false },
+            "pattern": ""
+          },
+          "userPrompt": {
+            "buildship": { "index": 2, "sensitive": false },
+            "type": "string",
+            "default": "",
+            "description": "",
+            "title": "User Prompt",
+            "pattern": ""
+          },
+          "model": {
+            "enum": ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma-7b-it"],
+            "buildship": {
+              "index": 4,
+              "sensitive": false,
+              "options": [
+                { "value": "llama3-70b-8192", "label": "LLaMA3 70b" },
+                { "label": "LLaMA3 8b", "value": "llama3-8b-8192" },
+                { "label": "Mixtral 8x7b", "value": "mixtral-8x7b-32768" },
+                { "value": "gemma-7b-it", "label": "Gemma 7b" }
+              ]
+            },
+            "default": "llama3-8b-8192",
+            "pattern": "",
+            "description": "",
+            "type": "string",
+            "title": "Model"
+          },
+          "threadId": {
+            "buildship": { "index": 5, "sensitive": false },
+            "description": "",
+            "default": "",
+            "pattern": "",
+            "type": "string",
+            "title": "Thread Id"
+          }
+        },
+        "type": "object",
+        "required": ["maxTokens", "userPrompt", "systemPrompt", "groqApiKey", "model"]
+      },
+      "type": "script",
+      "script": "import Groq from 'groq-sdk';\nimport { snakeCase } from \"lodash\";\nimport fs from \"fs\";\nimport path from \"path\";\nimport { v4 as uuidv4 } from 'uuid';\n\nconst getChatHistory = (threadId: string, logging: any) => {\n  // Load previous messages if the file exists\n  let previousMessages = [];\n  const filePath = process.env.BUCKET_FOLDER_PATH + '/nodes/groq-assistant/store/' + threadId + '.jsonl';\n  if (threadId) {\n    const fileExists = fs.existsSync(filePath);\n    if (fileExists) {\n      const fileContent = fs.readFileSync(filePath, 'utf8');\n      previousMessages = JSON.parse(fileContent);\n      logging.log(previousMessages);\n    }\n  }\n  return previousMessages;\n}\n\nconst appendChatHistory = (threadId: string, newMessages: unknown[]) => {\n  const filePath = process.env.BUCKET_FOLDER_PATH + '/nodes/groq-assistant/store/' + threadId + '.jsonl';\n  // Create folder path if it doesn't exist\n  const folderPath = path.dirname(filePath);\n  if (!fs.existsSync(folderPath)) {\n    fs.mkdirSync(folderPath, { recursive: true });\n  }\n  // Save userRequest and output to a JSONL file\n  const fileContent = JSON.stringify(newMessages);\n  fs.writeFileSync(filePath, fileContent);\n}\n\n\ntype Tool = Groq.Chat.CompletionCreateParams.Tool;\ntype FinishReason = \"stop\" | \"length\" | \"tool_calls\" | \"content_filter\";\n\nconst nodeToGroqTool: (node: Node) => Tool = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: snakeCase(node.label || node.meta.name),\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\ntype Params = {\n  groqApiKey: string;\n  model: string;\n  maxTokens: number;\n  userPrompt: string;\n  systemPrompt: string;\n  threadId?: string;\n};\n\nexport default async function assistant(\n  { groqApiKey, model, maxTokens, userPrompt, systemPrompt, threadId }: Params,\n  { logging, execute, nodes }: any\n) {\n  const groq = new Groq({ apiKey: groqApiKey });\n\n  const tools: Tool[] = nodes?.map(nodeToGroqTool) ?? [];\n\n  /** \n  * Retrieve the conversation from the threadId if it exists, otherwise generate a new threadId\n  **/\n  threadId ||= uuidv4();\n  const chatHistory = getChatHistory(threadId, logging) as Groq.Chat.ChatCompletion.Choice.Message[];\n\n  const initialMessages: Groq.Chat.CompletionCreateParams.Message[] = [\n    {\n      \"role\": \"system\",\n      \"content\": systemPrompt\n    },\n    // append the chat history to the initial messages excluding the system messages\n    ...(chatHistory.filter(m => m.role !== \"system\") ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }\n  ];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let requestCount = 1;\n    let request = { ...baseRequest };\n    let response: Groq.Chat.ChatCompletion;\n\n    let finish_reasons: FinishReason[] = [];\n\n    const isEndTurn = (reasons: FinishReason[]) =>\n      reasons.includes(\"stop\") ||\n      reasons.includes(\"length\") ||\n      reasons.includes(\"content_filter\");\n\n    do {\n      logging.log(`Groq request(${requestCount}):`, request);\n      response = await groq.chat.completions.create(request);\n      logging.log(`Groq response(${requestCount}): `, response);\n\n      const choices = response.choices;\n      finish_reasons = choices.map(choice => choice.finish_reason) as FinishReason[];\n\n      if (isEndTurn(finish_reasons)) {\n        break;\n      }\n      for (const choice of choices) {\n        request.messages.push(choice.message);\n\n        const finish_reason = choice.finish_reason as FinishReason;\n        const isToolUse = finish_reason === \"tool_calls\";\n\n        if (isToolUse) {\n          const toolCalls = choice.message.tool_calls || [];\n\n          for (const toolCall of toolCalls) {\n            const node: Node = nodes?.find((node: Node) =>\n              snakeCase(node.label || node.meta.name) === toolCall.function?.name);\n            if (!node) {\n              logging.log(\"Failed to find tool:\");\n              logging.log(toolCall);\n              logging.log(node);\n              throw new Error(\"Failed to find tool\");\n            }\n            logging.log(`Tool: ${node.label} `);\n            let args = {} as Record<string, unknown>;\n            try {\n              args = JSON.parse(toolCall.function?.arguments ?? \"{}\");\n            } catch (cause) {\n              logging.log(\"Failed to parse tool arguments\");\n              logging.log(toolCall.function?.arguments);\n              logging.log(cause);\n            }\n\n            // filter hallucinated inputs\n            const inputs = {} as Record<string, unknown>;\n            for (const [inputKey, inputValue] of Object.entries(args)) {\n              if (node.inputs.properties[inputKey]) {\n                inputs[inputKey] = inputValue;\n              }\n            }\n            const toolResponse = await execute(node.label, inputs);\n            logging.log(\"Tool response: \", toolResponse);\n            request.messages.push(\n              {\n                \"tool_call_id\": toolCall.id,\n                \"role\": \"tool\",\n                \"name\": toolCall.function?.name,\n                \"content\": toolResponse ? JSON.stringify(toolResponse) : \"\",\n              });\n          }\n        }\n      }\n      requestCount++;\n    } while (!isEndTurn(finish_reasons));\n\n    let newChatHistory = [...request.messages, ...(response.choices.map(c => c.message) || [])]\n    appendChatHistory(threadId, newChatHistory);\n    return {\n      message: response.choices[0]?.message?.content || \"No Response\",\n      threadId,\n      data: response\n    }\n  } catch (error) {\n    logging.log(\"Error:\");\n    logging.log(error);\n    return { error }\n  }\n}\n\ntype Node = {\n  label: string;\n  meta: {\n    id: string;\n    description: string;\n    name: string;\n    [key: string]: any;\n  };\n  inputs: {\n    type: string;\n    required: string[];\n    properties: Record<string, {\n      description: string;\n      buildship?: {\n        toBeAutoFilled?: boolean;\n        [key: string]: any;\n      }\n      [key: string]: any;\n    }>;\n  };\n  [key: string]: any;\n};\n\n",
+      "label": "Groq Assistant",
+      "subType": "assistant",
+      "name": "Groq Assistant",
+      "nodes": [],
+      "integrations": []
+    },
+    {
+      "label": "Return",
+      "response": { "2XX": { "properties": {}, "type": "object" } },
+      "type": "return",
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "id": "070a86f4-d0c2-4452-b36c-d9b587ced0f5",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "default": "200",
+            "description": "The HTTP status code to return",
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
+            "buildship": {
+              "index": 0,
+              "options": [
+                { "label": "OK (200)", "value": "200" },
+                { "label": "Created (201)", "value": "201" },
+                { "label": "Accepted (202)", "value": "202" },
+                { "label": "Redirect (301)", "value": "301" },
+                { "value": "204", "label": "No Content (204)" },
+                { "label": "Bad Request (400)", "value": "400" },
+                { "label": "Unauthorized (401)", "value": "401" },
+                { "label": "Forbidden (403)", "value": "403" },
+                { "label": "Not Found (404)", "value": "404" },
+                { "label": "Too Many Requests (429)", "value": "429" },
+                { "label": "Internal Server Error (500)", "value": "500" }
+              ]
+            },
+            "title": "Status code",
+            "type": "string"
+          },
+          "cacheMaxAge": {
+            "default": 0,
+            "type": "number",
+            "description": "Set cache duration in seconds",
+            "buildship": { "index": 2 },
+            "title": "Cache Time"
+          },
+          "value": {
+            "description": "The value to return",
+            "title": "Value",
+            "default": "",
+            "buildship": { "index": 1 },
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    }
+  ],
+  "trigger": {
+    "testingSchema": [
+      {
+        "type": "shortText",
+        "disabled": true,
+        "prefill": "endpointURL",
+        "name": "endpointURL",
+        "label": "Endpoint URL"
+      },
+      { "name": "apiRequestData", "type": "apiRequestData", "prefill": "apiRequestData" }
+    ],
+    "label": "Rest API Call",
+    "instruction": { "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}", "title": "Endpoint URL" },
+    "order": 1,
+    "id": "http",
+    "live": true,
+    "inputs": {
+      "properties": {
+        "method": {
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "type": "string",
+          "pattern": "",
+          "description": "The HTTP method for the incoming request.",
+          "buildship": {
+            "index": 1,
+            "sensitive": false,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "label": "POST", "value": "POST" },
+              { "label": "PUT", "value": "PUT" },
+              { "value": "DELETE", "label": "DELETE" }
+            ]
+          },
+          "title": "Method",
+          "default": "GET"
+        },
+        "path": {
+          "default": "/",
+          "title": "Path",
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "type": "string",
+          "buildship": { "sensitive": false, "index": 0 },
+          "pattern": ""
+        }
+      },
+      "required": ["method", "path"],
+      "type": "object"
+    },
+    "request": {
+      "type": "object",
+      "buildship": {},
+      "required": [],
+      "title": "Request",
+      "properties": {
+        "body": {
+          "buildship": {},
+          "description": "Body of the request",
+          "title": "Body",
+          "properties": {
+            "threadId": { "type": "string", "description": "", "buildship": { "index": 0 }, "title": "Thread Id" },
+            "message": { "title": "Message", "type": "string", "buildship": { "index": 0 }, "description": "" }
+          },
+          "type": "object"
+        },
+        "query": {
+          "type": "object",
+          "title": "Query",
+          "buildship": {},
+          "properties": {},
+          "description": "Query parameters"
+        },
+        "headers": {
+          "title": "Request Headers",
+          "type": "object",
+          "description": "Headers of the request",
+          "properties": {},
+          "buildship": {}
+        }
+      }
+    },
+    "output": {
+      "title": "Request",
+      "buildship": {},
+      "type": "object",
+      "properties": {
+        "headers": {
+          "type": "object",
+          "description": "Headers of the request",
+          "buildship": {},
+          "properties": {
+            "authorization": {
+              "type": "string",
+              "title": "Authorization",
+              "description": "Authorization header",
+              "buildship": { "index": 1 }
+            },
+            "content-type": {
+              "type": "string",
+              "description": "Content-Type of the request",
+              "title": "Content-Type",
+              "buildship": { "index": 0 }
+            }
+          },
+          "title": "Headers"
+        },
+        "query": {
+          "buildship": { "index": 0 },
+          "description": "Query parameters",
+          "title": "Query parameters",
+          "type": "object"
+        },
+        "body": { "title": "Body", "buildship": { "index": 1 }, "description": "Body of the request", "type": "object" }
+      }
+    },
+    "type": "http",
+    "groupId": null,
+    "script": "",
+    "dependencies": {},
+    "meta": {
+      "icon": {},
+      "id": "http",
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "name": "Rest API Call"
+    }
+  },
+  "nodeValues": {
+    "http": { "method": "POST", "path": "/groq-asssistant-trigger" },
+    "62979cb6-d40c-45ef-bb6f-e48946447427": {
+      "maxTokens": 1024,
+      "systemPrompt": "",
+      "model": "llama3-8b-8192",
+      "threadId": { "keys": ["request", "body", "threadId"] },
+      "groqApiKey": "",
+      "userPrompt": { "keys": ["request", "body", "message"] }
+    },
+    "f30d892c-f5ad-49c1-9301-4e309c9809ae": {
+      "maxTokens": 1024,
+      "threadId": "",
+      "userPrompt": "",
+      "model": "llama3-8b-8192",
+      "systemPrompt": "",
+      "groqApiKey": ""
+    },
+    "80253178-8068-45d2-ac9e-bc4492fe054e": {
+      "cacheMaxAge": 0,
+      "value": { "keys": ["f30d892c-f5ad-49c1-9301-4e309c9809ae"] },
+      "status": "200"
+    },
+    "070a86f4-d0c2-4452-b36c-d9b587ced0f5": {
+      "value": {
+        "hasErrors": false,
+        "type": "javascript",
+        "expression": "{\n  \"message\": ctx[\"root\"][\"62979cb6-d40c-45ef-bb6f-e48946447427\"][\"message\"],\n  \"threadId\": ctx[\"root\"][\"62979cb6-d40c-45ef-bb6f-e48946447427\"][\"threadId\"]\n}"
+      },
+      "status": "200",
+      "cacheMaxAge": 0
+    }
+  },
+  "notes": "<p># Request</p><p>A simple request-response:</p><p>{</p><p><span style=\"color: rgb(29, 117, 179); background-color: rgb(240, 240, 240);\">\"message\"</span><span style=\"color: rgb(51, 51, 51); background-color: rgb(240, 240, 240);\">: </span><span style=\"color: rgb(179, 94, 20); background-color: rgb(240, 240, 240);\">\"Hello, Groq\"</span></p><p>}</p>"
+}
