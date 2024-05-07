@@ -3,6 +3,7 @@ import { snakeCase } from "lodash";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from 'uuid';
+import { jsonc } from 'jsonc';
 
 const getChatHistory = (threadId: string, logging: any) => {
   // Load previous messages if the file exists
@@ -188,7 +189,10 @@ export default async function assistant(
     }
   } catch (error) {
     logging.log("Error:");
-    logging.log(error);
+    logging.log(
+      // remove circular references
+      jsonc.parse(jsonc.stringify(error))
+    );
     return { error }
   }
 }

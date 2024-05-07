@@ -1,5 +1,6 @@
 import Groq from 'groq-sdk';
 import { snakeCase } from "lodash";
+import { jsonc } from 'jsonc';
 
 type Tool = Groq.Chat.CompletionCreateParams.Tool;
 type FinishReason = "stop" | "length" | "tool_calls" | "content_filter";
@@ -144,7 +145,10 @@ export default async function assistant(
     }
   } catch (error) {
     logging.log("Error:");
-    logging.log(error);
+    logging.log(
+      // remove circular references
+      jsonc.parse(jsonc.stringify(error))
+    );
     return { error }
   }
 }
