@@ -1,5 +1,37 @@
 import Groq from 'groq-sdk';
 import { snakeCase } from "lodash";
+import fs from "fs";
+import path from "path";
+import { v4 as uuidv4 } from 'uuid';
+import { ChatCompletion } from 'groq-sdk/resources/chat';
+
+const getChatHistory = (threadId: string, logging: any) => {
+  // Load previous messages if the file exists
+  let previousMessages = [];
+  const filePath = process.env.BUCKET_FOLDER_PATH + '/nodes/groq-assistant/store/' + threadId + '.jsonl';
+  if (threadId) {
+    const fileExists = fs.existsSync(filePath);
+    if (fileExists) {
+      const fileContent = fs.readFileSync(filePath, 'utf8');
+      previousMessages = JSON.parse(fileContent);
+      logging.log(previousMessages);
+    }
+  }
+  return previousMessages;
+}
+
+const appendChatHistory = (threadId: string, newMessages: unknown[]) => {
+  const filePath = process.env.BUCKET_FOLDER_PATH + '/nodes/groq-assistant/store/' + threadId + '.jsonl';
+  // Create folder path if it doesn't exist
+  const folderPath = path.dirname(filePath);
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath, { recursive: true });
+  }
+  // Save userRequest and output to a JSONL file
+  const fileContent = JSON.stringify(newMessages);
+  fs.writeFileSync(filePath, fileContent);
+}
+
 
 type Tool = Groq.Chat.CompletionCreateParams.Tool;
 type FinishReason = "stop" | "length" | "tool_calls" | "content_filter";
@@ -38,33 +70,43 @@ type Params = {
   maxTokens: number;
   userPrompt: string;
   systemPrompt: string;
+  threadId?: string;
 };
 
 export default async function assistant(
-  { groqApiKey, model, maxTokens, userPrompt, systemPrompt }: Params,
+  { groqApiKey, model, maxTokens, userPrompt, systemPrompt, threadId }: Params,
   { logging, execute, nodes }: any
 ) {
   const groq = new Groq({ apiKey: groqApiKey });
 
   const tools: Tool[] = nodes?.map(nodeToGroqTool) ?? [];
 
-  const initialMessages = [
+  /** 
+  * Retrieve the conversation from the threadId if it exists, otherwise generate a new threadId
+  **/
+  threadId ||= uuidv4();
+  const chatHistory = getChatHistory(threadId, logging) as ChatCompletion.Choice.Message[];
+
+  const initialMessages: Groq.Chat.CompletionCreateParams.Message[] = [
     {
       "role": "system",
       "content": systemPrompt
     },
+    // append the chat history to the initial messages excluding the system messages
+    ...(chatHistory.filter(m => m.role === "system") ?? []),
     {
       "role": "user",
       "content": userPrompt,
     }
-  ] as Groq.Chat.CompletionCreateParams.Message[];
+  ];
 
   const baseRequest = {
     "model": model,
     "max_tokens": maxTokens,
     "tools": tools,
     "messages": initialMessages
-  }
+  };
+
   try {
     let requestCount = 1;
     let request = { ...baseRequest };
@@ -138,6 +180,8 @@ export default async function assistant(
       requestCount++;
     } while (!isEndTurn(finish_reasons));
 
+    let newChatHistory = [...request.messages, ...(response.choices || [])]
+    appendChatHistory(threadId, newChatHistory);
     return {
       response: response.choices[0]?.message?.content || "No Response",
       threadId: null
