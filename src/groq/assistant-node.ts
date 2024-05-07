@@ -86,11 +86,9 @@ export default async function assistant(
       finish_reasons = choices.map(choice => choice.finish_reason) as FinishReason[];
 
       if (isEndTurn(finish_reasons)) {
-        logging.log("End turn", finish_reasons);
         break;
       }
       for (const choice of choices) {
-        logging.log("Choice: ", choice);
         request.messages.push(choice.message);
 
         const finish_reason = choice.finish_reason as FinishReason;
@@ -98,7 +96,6 @@ export default async function assistant(
 
         if (isToolUse) {
           const toolCalls = choice.message.tool_calls || [];
-          logging.log("Tool calls: ", toolCalls);
 
           for (const toolCall of toolCalls) {
             const node: Node = nodes?.find((node: Node) =>
@@ -141,15 +138,13 @@ export default async function assistant(
       requestCount++;
     } while (!isEndTurn(finish_reasons));
 
-    logging.log(finish_reasons, isEndTurn(finish_reasons));
-    logging.log(response.choices[0]);
-    logging.log(response.choices[0].message);
     return {
       response: response.choices[0]?.message?.content || "No Response",
       threadId: null
     }
   } catch (error) {
-    logging.log(`Error: ${error}`);
+    logging.log("Error:");
+    logging.log(error);
     return { error }
   }
 }
