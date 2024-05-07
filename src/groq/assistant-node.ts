@@ -2,6 +2,7 @@ import Groq from 'groq-sdk';
 import { snakeCase } from "lodash";
 
 type Tool = Groq.Chat.CompletionCreateParams.Tool;
+type FinishReason = "stop" | "length" | "tool_calls" | "content_filter";
 
 const nodeToGroqTool: (node: Node) => Tool = (node) => {
   return {
@@ -65,29 +66,36 @@ export default async function assistant(
     "messages": initialMessages
   }
   try {
-    let request = { ...baseRequest };
     let requestCount = 1;
-    logging.log(`Groq request(${requestCount}):`, request);
-    let response = await groq.chat.completions.create(request);
+    let request = { ...baseRequest };
+    let response: Groq.Chat.ChatCompletion;
 
-    logging.log(`Groq response(${requestCount}): `, response);
+    let finish_reasons: FinishReason[] = [];
+
+    const isEndTurn = (reasons: FinishReason[]) =>
+      reasons.includes("stop") ||
+      reasons.includes("length") ||
+      reasons.includes("content_filter");
 
     do {
-      // if (response.data.type === "error") {
-      //   throw response.data.error;
-      // }
+      logging.log(`Groq request(${requestCount}):`, request);
+      response = await groq.chat.completions.create(request);
+      logging.log(`Groq response(${requestCount}): `, response);
+
       const choices = response.choices;
-      const isEndTurn = choices.find(choice => choice.finish_reason === "stop");
-      if (isEndTurn) {
+      finish_reasons = choices.map(choice => choice.finish_reason) as FinishReason[];
+
+      if (isEndTurn(finish_reasons)) {
+        logging.log("End turn", finish_reasons);
         break;
       }
       for (const choice of choices) {
         logging.log("Choice: ", choice);
         request.messages.push(choice.message);
-        const finish_reason = choice.finish_reason;
 
+        const finish_reason = choice.finish_reason as FinishReason;
         const isToolUse = finish_reason === "tool_calls";
-        if (!isToolUse) break;
+
         if (isToolUse) {
           const toolCalls = choice.message.tool_calls || [];
           logging.log("Tool calls: ", toolCalls);
@@ -131,15 +139,14 @@ export default async function assistant(
         }
       }
       requestCount++;
-      logging.log(`Groq request(${requestCount}):`, request);
-      response = await groq.chat.completions.create(request);
-      logging.log(`Groq response(${requestCount}): `, response);
-    } while (true);
+    } while (!isEndTurn(finish_reasons));
 
+    logging.log(finish_reasons, isEndTurn(finish_reasons));
+    logging.log(response.choices[0]);
+    logging.log(response.choices[0].message);
     return {
-      response: response.choices[0].message.content,
-      // chatHistory: [...request.messages, { role: "assistant", content: response.data.content }],
-      // data: response,
+      response: response.choices[0]?.message?.content || "No Response",
+      threadId: null
     }
   } catch (error) {
     logging.log(`Error: ${error}`);
