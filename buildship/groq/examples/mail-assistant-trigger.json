@@ -1,0 +1,445 @@
+{
+  "nodes": [
+    {
+      "integrations": [],
+      "script": "import Groq from 'groq-sdk';\nimport { snakeCase } from \"lodash\";\nimport fs from \"fs\";\nimport path from \"path\";\nimport { v4 as uuidv4 } from 'uuid';\nimport { jsonc } from 'jsonc';\n\nconst getChatHistory = (threadId: string, logging: any) => {\n  // Load previous messages if the file exists\n  let previousMessages = [];\n  const filePath = process.env.BUCKET_FOLDER_PATH + '/nodes/groq-assistant/store/' + threadId + '.jsonl';\n  if (threadId) {\n    const fileExists = fs.existsSync(filePath);\n    if (fileExists) {\n      const fileContent = fs.readFileSync(filePath, 'utf8');\n      previousMessages = JSON.parse(fileContent);\n      logging.log(previousMessages);\n    }\n  }\n  return previousMessages;\n}\n\nconst appendChatHistory = (threadId: string, newMessages: unknown[]) => {\n  const filePath = process.env.BUCKET_FOLDER_PATH + '/nodes/groq-assistant/store/' + threadId + '.jsonl';\n  // Create folder path if it doesn't exist\n  const folderPath = path.dirname(filePath);\n  if (!fs.existsSync(folderPath)) {\n    fs.mkdirSync(folderPath, { recursive: true });\n  }\n  // Save userRequest and output to a JSONL file\n  const fileContent = JSON.stringify(newMessages);\n  fs.writeFileSync(filePath, fileContent);\n}\n\n\ntype Tool = Groq.Chat.CompletionCreateParams.Tool;\ntype FinishReason = \"stop\" | \"length\" | \"tool_calls\" | \"content_filter\";\n\nconst nodeToGroqTool: (node: Node) => Tool = (node) => {\n  return {\n    type: \"function\",\n    function: {\n      name: snakeCase(node.label || node.meta.name),\n      description: node.meta.description ?? \"\",\n      parameters: {\n        type: \"object\",\n        properties: Object.entries(node.inputs.properties)\n          .reduce((properties, [name, value]) => {\n            if (value.buildship && !value.buildship.toBeAutoFilled) return properties;\n            return {\n              ...properties, [name]: {\n                type: value.type,\n                enum: value.enum,\n                description: value.description\n              }\n            }\n          }, {}),\n        required: Object.entries(node.inputs.properties).map(([name, value]) => {\n          if (value.buildship && value.buildship.toBeAutoFilled && node.inputs.required.includes(name)) return name;\n          return false;\n        }).filter(Boolean),\n      }\n    }\n  };\n}\n\ntype Params = {\n  groqApiKey: string;\n  model: string;\n  maxTokens: number;\n  userPrompt: string;\n  systemPrompt: string;\n  threadId?: string;\n};\n\nexport default async function assistant(\n  { groqApiKey, model, maxTokens, userPrompt, systemPrompt, threadId }: Params,\n  { logging, execute, nodes }: any\n) {\n  const groq = new Groq({ apiKey: groqApiKey });\n\n  const tools: Tool[] = nodes?.map(nodeToGroqTool) ?? [];\n\n  /** \n  * Retrieve the conversation from the threadId if it exists, otherwise generate a new threadId\n  **/\n  threadId ||= uuidv4();\n  const chatHistory = getChatHistory(threadId, logging) as Groq.Chat.ChatCompletion.Choice.Message[];\n\n  const initialMessages: Groq.Chat.CompletionCreateParams.Message[] = [\n    {\n      \"role\": \"system\",\n      \"content\": systemPrompt\n    },\n    // append the chat history to the initial messages excluding the system messages\n    ...(chatHistory.filter(m => m.role !== \"system\") ?? []),\n    {\n      \"role\": \"user\",\n      \"content\": userPrompt,\n    }\n  ];\n\n  const baseRequest = {\n    \"model\": model,\n    \"max_tokens\": maxTokens,\n    \"tools\": tools,\n    \"messages\": initialMessages\n  };\n\n  try {\n    let requestCount = 1;\n    let request = { ...baseRequest };\n    let response: Groq.Chat.ChatCompletion;\n\n    let finish_reasons: FinishReason[] = [];\n\n    const isEndTurn = (reasons: FinishReason[]) =>\n      reasons.includes(\"stop\") ||\n      reasons.includes(\"length\") ||\n      reasons.includes(\"content_filter\");\n\n    do {\n      logging.log(`Groq request(${requestCount}):`, request);\n      response = await groq.chat.completions.create(request);\n      logging.log(`Groq response(${requestCount}): `, response);\n\n      const choices = response.choices;\n      finish_reasons = choices.map(choice => choice.finish_reason) as FinishReason[];\n\n      if (isEndTurn(finish_reasons)) {\n        break;\n      }\n      for (const choice of choices) {\n        request.messages.push(choice.message);\n\n        const finish_reason = choice.finish_reason as FinishReason;\n        const isToolUse = finish_reason === \"tool_calls\";\n\n        if (isToolUse) {\n          const toolCalls = choice.message.tool_calls || [];\n\n          for (const toolCall of toolCalls) {\n            const node: Node = nodes?.find((node: Node) =>\n              snakeCase(node.label || node.meta.name) === toolCall.function?.name);\n            if (!node) {\n              logging.log(\"Failed to find tool:\");\n              logging.log(toolCall);\n              logging.log(node);\n              throw new Error(\"Failed to find tool\");\n            }\n            logging.log(`Tool: ${node.label} `);\n            let args = {} as Record<string, unknown>;\n            try {\n              args = JSON.parse(toolCall.function?.arguments ?? \"{}\");\n            } catch (cause) {\n              logging.log(\"Failed to parse tool arguments\");\n              logging.log(toolCall.function?.arguments);\n              logging.log(cause);\n            }\n\n            // filter hallucinated inputs\n            const inputs = {} as Record<string, unknown>;\n            for (const [inputKey, inputValue] of Object.entries(args)) {\n              if (node.inputs.properties[inputKey]) {\n                inputs[inputKey] = inputValue;\n              }\n            }\n            const toolResponse = await execute(node.label, inputs);\n            logging.log(\"Tool response: \", toolResponse);\n            request.messages.push(\n              {\n                \"tool_call_id\": toolCall.id,\n                \"role\": \"tool\",\n                \"name\": toolCall.function?.name,\n                \"content\": toolResponse ? JSON.stringify(toolResponse) : \"\",\n              });\n          }\n        }\n      }\n      requestCount++;\n    } while (!isEndTurn(finish_reasons));\n\n    let newChatHistory = [...request.messages, ...(response.choices.map(c => c.message) || [])]\n    appendChatHistory(threadId, newChatHistory);\n    return {\n      message: response.choices[0]?.message?.content || \"No Response\",\n      threadId,\n      data: response\n    }\n  } catch (error) {\n    logging.log(\"Error:\");\n    logging.log(\n      // remove circular references\n      jsonc.parse(jsonc.stringify(error))\n    );\n    return { error }\n  }\n}\n\ntype Node = {\n  label: string;\n  meta: {\n    id: string;\n    description: string;\n    name: string;\n    [key: string]: any;\n  };\n  inputs: {\n    type: string;\n    required: string[];\n    properties: Record<string, {\n      description: string;\n      buildship?: {\n        toBeAutoFilled?: boolean;\n        [key: string]: any;\n      }\n      [key: string]: any;\n    }>;\n  };\n  [key: string]: any;\n};\n\n",
+      "output": {
+        "description": "",
+        "buildship": { "index": 0 },
+        "title": "",
+        "properties": {
+          "threadId": { "type": "string", "title": "Thread Id", "buildship": { "index": 1 }, "description": "" },
+          "message": { "buildship": { "index": 0 }, "type": "string", "description": "", "title": "Message" },
+          "data": { "type": "string", "description": "", "buildship": { "index": 2 }, "title": "Data" }
+        },
+        "type": "object"
+      },
+      "inputs": {
+        "properties": {
+          "model": {
+            "title": "Model",
+            "default": "llama3-8b-8192",
+            "pattern": "",
+            "enum": ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma-7b-it"],
+            "type": "string",
+            "description": "",
+            "buildship": {
+              "options": [
+                { "value": "llama3-70b-8192", "label": "LLaMA3 70b" },
+                { "label": "LLaMA3 8b", "value": "llama3-8b-8192" },
+                { "label": "Mixtral 8x7b", "value": "mixtral-8x7b-32768" },
+                { "label": "Gemma 7b", "value": "gemma-7b-it" }
+              ],
+              "index": 4,
+              "sensitive": false
+            }
+          },
+          "groqApiKey": {
+            "description": "",
+            "buildship": { "sensitive": true, "index": 0 },
+            "pattern": "",
+            "title": "API Key",
+            "type": "string"
+          },
+          "systemPrompt": {
+            "buildship": { "sensitive": false, "index": 1 },
+            "type": "string",
+            "default": "",
+            "title": "Instructions",
+            "description": "",
+            "pattern": ""
+          },
+          "maxTokens": {
+            "type": "number",
+            "description": "",
+            "pattern": "",
+            "title": "Max Tokens",
+            "default": "",
+            "buildship": { "sensitive": false, "index": 4 }
+          },
+          "userPrompt": {
+            "default": "",
+            "pattern": "",
+            "title": "User Prompt",
+            "type": "string",
+            "buildship": { "index": 2, "sensitive": false },
+            "description": ""
+          },
+          "threadId": {
+            "pattern": "",
+            "buildship": { "index": 5, "sensitive": false },
+            "title": "Thread Id",
+            "default": "",
+            "type": "string",
+            "description": ""
+          }
+        },
+        "required": ["maxTokens", "userPrompt", "systemPrompt", "groqApiKey", "model"],
+        "type": "object"
+      },
+      "id": "b965b351-9e26-4f2c-9841-d61e9b203471",
+      "dependencies": { "lodash": "4.17.21", "groq-sdk": "0.3.3" },
+      "meta": {
+        "description": "",
+        "id": "groq-assistant-node",
+        "name": "Groq Assistant",
+        "icon": {
+          "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fgroq.png?alt=media&token=7f60edf7-f402-4762-8334-00cb2981cef0",
+          "type": "URL"
+        }
+      },
+      "onFail": null,
+      "label": "Groq Assistant",
+      "subType": "assistant",
+      "name": "Groq Assistant",
+      "nodes": [
+        {
+          "id": "9cf136b0-608e-4779-a22d-06220c6353b4",
+          "onFail": null,
+          "inputs": {
+            "type": "object",
+            "properties": {
+              "workflowId": {
+                "buildship": { "sensitive": false, "index": 1 },
+                "pattern": "",
+                "title": "Workflow ID",
+                "type": "string",
+                "default": "",
+                "description": "The ID of the workflow to call. You can get the Workflow ID from the `BuildShip Trigger` config."
+              },
+              "wait": {
+                "description": "Whether you wish to wait for the triggered workflow to execute.",
+                "buildship": { "sensitive": false, "index": 3 },
+                "title": "Await?",
+                "type": "boolean",
+                "pattern": "",
+                "default": "true"
+              },
+              "projectId": {
+                "pattern": "",
+                "default": "",
+                "type": "string",
+                "buildship": { "index": 0, "sensitive": false },
+                "title": "Project ID",
+                "description": "**(OPTIONAL)** If you wish to execute a BuildShip Workflow that's not a part of the same project, you'd need to specify the Project ID. You can find the **Project ID** in the BuildShip Project Settings or from the `BuildShip Trigger` config."
+              },
+              "contacts": {
+                "description": "the name ",
+                "buildship": { "sensitive": false, "index": 2 },
+                "title": "Data",
+                "default": {},
+                "properties": {},
+                "pattern": "",
+                "type": "object"
+              }
+            },
+            "required": ["workflowId", "wait"]
+          },
+          "_libRef": {
+            "libType": "public",
+            "isDirty": true,
+            "integrity": "v3:cbbae2c115d7ba0f3baff054c992d171",
+            "version": "1.0.3",
+            "libNodeRefId": "@buildship/execute-workflow",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/execute-workflow/1.0.3.cjs"
+          },
+          "type": "script",
+          "meta": {
+            "description": "get contacts a function to access contacts and return a list of emails",
+            "icon": {
+              "type": "URL",
+              "url": "https://firebasestorage.googleapis.com/v0/b/website-a1s39m.appspot.com/o/buildship-app-logos%2Fbuildship.png?alt=media&token=c5248170-8cb1-4a66-af37-436c7a2aa6b8"
+            },
+            "name": "Get contacts",
+            "id": "execute-workflow"
+          },
+          "script": "import { GoogleAuth } from 'google-auth-library';\nexport default async function cloudRunServiceRequest({\n    workflowId,\n    data,\n    wait,\n    projectId\n},{logging}) {\n    const auth = new GoogleAuth();\n    const _projectId = projectId || process.env.GCLOUD_PROJECT;\n    const url = `https://${_projectId.split(\"-\")[1]}.buildship.run/executeWorkflow/${workflowId}`\n    const client = await auth.getIdTokenClient(`${_projectId}-${workflowId}`);\n    const headers = await client.getRequestHeaders(url);\n    headers['Content-Type'] = 'application/json';\n    if (wait){\n      const response =  await fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      try {\n          const resData = await response.json();\n          return {\n            \"success\": true,\n            \"response\": resData\n          }\n      }catch(e){\n          return {\n            \"success\": false,\n            \"error\": e\n          }\n      }\n    }\n    else{\n      fetch(url, {\n        method: \"POST\",\n        headers,\n        body: JSON.stringify(data)\n      });\n      return {\n        \"success\": true\n      }\n    }\n}",
+          "integrations": [],
+          "dependencies": { "google-auth-library": "9.4.1" },
+          "name": "Get contacts",
+          "label": "get contacts",
+          "output": { "properties": {}, "type": "object", "buildship": {} }
+        },
+        {
+          "script": "import sgMail from '@sendgrid/mail';\nexport default async function sendEmailWithSendgrid({\n    apiKey,\n    fromAddress,\n    fromName,\n    toAddress,\n    emailMessage,\n    tracking\n}, {\n    logging\n}) {\n    sgMail.setApiKey(apiKey);\n    const msg = {\n        to: toAddress,\n        from: fromAddress,\n        subject: fromName,\n        text: emailMessage,\n        html: emailMessage,\n        trackingSettings: {\n            clickTracking: {\n                enable: tracking\n            },\n            openTracking: {\n                enable: tracking\n            },\n            subscriptionTracking: {\n                enable: tracking\n            }\n        }\n    };\n    try {\n        await sgMail.send(msg);\n        logging.log('Email sent');\n        return \"Email Sent!\";\n    } catch (error) {\n        logging.error(error);\n        return error;\n    }\n}",
+          "inputs": {
+            "properties": {
+              "fromName": {
+                "type": "string",
+                "title": "From Name",
+                "buildship": { "index": 2 },
+                "description": "The name the email will appear to be sent from"
+              },
+              "toAddress": {
+                "title": "To Address",
+                "buildship": { "index": 3, "toBeAutoFilled": true },
+                "type": "string",
+                "description": "The email address the email will be sent to"
+              },
+              "apiKey": {
+                "description": "Your Sendgrid API Key. (Get your SendGrid API Key from [your Account Dashboard](https://app.sendgrid.com/settings/api_keys).)",
+                "type": "string",
+                "pattern": "",
+                "buildship": { "index": 0, "sensitive": true },
+                "default": "",
+                "title": "API Key"
+              },
+              "emailMessage": {
+                "default": "",
+                "buildship": { "toBeAutoFilled": true, "index": 4, "sensitive": false },
+                "pattern": "",
+                "type": "string",
+                "description": "The content of the email",
+                "title": "Email Body"
+              },
+              "tracking": {
+                "default": false,
+                "type": "boolean",
+                "title": "Tracking",
+                "description": "Whether to enable tracking for this email or not",
+                "buildship": { "index": 5 }
+              },
+              "fromAddress": {
+                "description": "The email address the email will be sent from",
+                "title": "From Address",
+                "type": "string",
+                "buildship": { "index": 1 }
+              }
+            },
+            "required": ["fromAddress", "fromName", "toAddress", "tracking", "emailMessage", "apiKey"],
+            "type": "object"
+          },
+          "integrations": [],
+          "meta": {
+            "icon": {
+              "type": "URL",
+              "url": "https://storage.googleapis.com/buildship-app-us-central1/icons/SendGrid.png"
+            },
+            "description": "Send Static email - Sends an email using the Sendgrid API with tracking (NOTE: The messages sent via SendGrid might end up in spam if you haven't verified your sendgrid account)",
+            "id": "sendgrid-static-email",
+            "name": "Send Static email"
+          },
+          "type": "script",
+          "dependencies": { "@sendgrid/mail": "7.7.0" },
+          "_libRef": {
+            "libNodeRefId": "@buildship/sendgrid-static-email",
+            "integrity": "v3:4e70e751e73a2d683aba69af8a0d8e30",
+            "version": "1.0.1",
+            "src": "https://storage.googleapis.com/buildship-app-us-central1/builtNodes/sendgrid-static-email/1.0.1.cjs",
+            "isDirty": true,
+            "libType": "public"
+          },
+          "onFail": null,
+          "id": "084e1b48-6cf7-4b90-b4ac-53abb9b1bbed",
+          "label": "Send Static email",
+          "output": { "buildship": {}, "properties": {}, "type": "object" },
+          "name": "Send Static email"
+        }
+      ],
+      "type": "script"
+    },
+    {
+      "label": "Return",
+      "id": "8a265bcb-3468-444e-a815-802d599059cc",
+      "type": "return",
+      "description": "The Return Node is used to return values from the workflow. It is generally the last node in the workflow. The return node is optional as the API can inherently return a 200 OK response by default. [Full Documentation](https://docs.buildship.com/core-nodes/return).",
+      "response": { "2XX": { "type": "object", "properties": {} } },
+      "inputs": {
+        "type": "object",
+        "required": [],
+        "properties": {
+          "status": {
+            "description": "The HTTP status code to return",
+            "type": "string",
+            "default": "200",
+            "buildship": {
+              "options": [
+                { "label": "OK (200)", "value": "200" },
+                { "value": "201", "label": "Created (201)" },
+                { "label": "Accepted (202)", "value": "202" },
+                { "value": "301", "label": "Redirect (301)" },
+                { "value": "204", "label": "No Content (204)" },
+                { "value": "400", "label": "Bad Request (400)" },
+                { "value": "401", "label": "Unauthorized (401)" },
+                { "value": "403", "label": "Forbidden (403)" },
+                { "value": "404", "label": "Not Found (404)" },
+                { "value": "429", "label": "Too Many Requests (429)" },
+                { "label": "Internal Server Error (500)", "value": "500" }
+              ],
+              "index": 0
+            },
+            "enum": ["200", "201", "202", "204", "400", "401", "403", "404", "429", "500"],
+            "title": "Status code"
+          },
+          "cacheMaxAge": {
+            "type": "number",
+            "default": 0,
+            "title": "Cache Time",
+            "buildship": { "index": 2 },
+            "description": "Set cache duration in seconds"
+          },
+          "value": {
+            "title": "Value",
+            "buildship": { "index": 1 },
+            "default": "",
+            "description": "The value to return",
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "trigger": {
+    "output": {
+      "properties": {
+        "body": {
+          "title": "Body",
+          "type": "object",
+          "description": "Body of the request",
+          "buildship": { "index": 1 }
+        },
+        "headers": {
+          "description": "Headers of the request",
+          "properties": {
+            "authorization": {
+              "title": "Authorization",
+              "type": "string",
+              "description": "Authorization header",
+              "buildship": { "index": 1 }
+            },
+            "content-type": {
+              "type": "string",
+              "title": "Content-Type",
+              "description": "Content-Type of the request",
+              "buildship": { "index": 0 }
+            }
+          },
+          "title": "Headers",
+          "type": "object",
+          "buildship": {}
+        },
+        "query": {
+          "description": "Query parameters",
+          "buildship": { "index": 0 },
+          "type": "object",
+          "title": "Query parameters"
+        }
+      },
+      "type": "object",
+      "buildship": {},
+      "title": "Request"
+    },
+    "id": "http",
+    "request": {
+      "title": "Request",
+      "properties": {
+        "headers": {
+          "description": "Headers of the request",
+          "type": "object",
+          "properties": {},
+          "buildship": {},
+          "title": "Request Headers"
+        },
+        "body": {
+          "title": "Body",
+          "description": "Body of the request",
+          "type": "object",
+          "buildship": {},
+          "properties": {
+            "message": { "title": "Message", "buildship": { "index": 0 }, "type": "string", "description": "" },
+            "threadId": { "type": "string", "title": "Thread Id", "buildship": { "index": 0 }, "description": "" }
+          }
+        },
+        "query": {
+          "properties": {},
+          "description": "Query parameters",
+          "type": "object",
+          "title": "Query",
+          "buildship": {}
+        }
+      },
+      "required": [],
+      "buildship": {},
+      "type": "object"
+    },
+    "instruction": { "title": "Endpoint URL", "bodyTemplate": "https://{{runtimeUrl}}/{{httpPath}}" },
+    "script": "",
+    "label": "Rest API Call",
+    "groupId": null,
+    "testingSchema": [
+      {
+        "name": "endpointURL",
+        "type": "shortText",
+        "label": "Endpoint URL",
+        "prefill": "endpointURL",
+        "disabled": true
+      },
+      { "type": "apiRequestData", "prefill": "apiRequestData", "name": "apiRequestData" }
+    ],
+    "meta": {
+      "description": "Create an API / HTTP endpoint as the trigger or starting point for your workflow. This endpoint can be used in other apps to run the workflow. [Full documentation](https://docs.buildship.com/trigger-nodes/rest-api)",
+      "icon": {},
+      "name": "Rest API Call",
+      "id": "http"
+    },
+    "order": 1,
+    "dependencies": {},
+    "live": true,
+    "type": "http",
+    "inputs": {
+      "properties": {
+        "method": {
+          "buildship": {
+            "sensitive": false,
+            "index": 1,
+            "options": [
+              { "label": "GET", "value": "GET" },
+              { "label": "POST", "value": "POST" },
+              { "label": "PUT", "value": "PUT" },
+              { "label": "DELETE", "value": "DELETE" }
+            ]
+          },
+          "type": "string",
+          "pattern": "",
+          "enum": ["GET", "POST", "PUT", "DELETE"],
+          "default": "GET",
+          "title": "Method",
+          "description": "The HTTP method for the incoming request."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "",
+          "buildship": { "index": 0, "sensitive": false },
+          "description": "The path of the API Endpoint. Additionally, define the structure for the incoming API requests. [Learn more about API Specification here](https://docs.buildship.com/basics/api-spec#request-specification).",
+          "title": "Path",
+          "default": "/"
+        }
+      },
+      "type": "object",
+      "required": ["method", "path"]
+    }
+  },
+  "nodeValues": {
+    "9cf136b0-608e-4779-a22d-06220c6353b4": { "projectId": "", "contacts": "", "wait": "true", "workflowId": "" },
+    "b965b351-9e26-4f2c-9841-d61e9b203471": {
+      "maxTokens": 1024,
+      "userPrompt": { "keys": ["request", "body", "message"] },
+      "systemPrompt": "You are specialized on sending emails with a concise response given a context. Users will describe the message they want to send and the expected recipient.   You must use 'get contacts' to look for your contacts and then use 'Send Email' to the required contact  Your signature should be always AI curated message from Mail Assistant",
+      "threadId": { "keys": ["request", "body", "threadId"] },
+      "model": "llama3-70b-8192",
+      "groqApiKey": ""
+    },
+    "8a265bcb-3468-444e-a815-802d599059cc": {
+      "value": {
+        "expression": "{\n  \"message\": ctx[\"root\"][\"b965b351-9e26-4f2c-9841-d61e9b203471\"][\"message\"],\n  \"threadId\": ctx[\"root\"][\"b965b351-9e26-4f2c-9841-d61e9b203471\"][\"threadId\"]\n}",
+        "hasErrors": false,
+        "type": "javascript"
+      },
+      "status": "200",
+      "cacheMaxAge": 0
+    },
+    "http": { "method": "POST", "path": "/groq-mail-assistant" },
+    "084e1b48-6cf7-4b90-b4ac-53abb9b1bbed": { "emailMessage": "", "tracking": false, "apiKey": "" }
+  },
+  "notes": "<p>Use Assistants to read your databases and send emails.</p><p><br></p><p>Learn more on how to create this Assistant on: <a href=\"https://docs.buildship.com/ai-models/assistant#use-case-viii-email-assistant\" rel=\"noopener noreferrer\" target=\"_blank\">https://docs.buildship.com/ai-models/assistant#use-case-viii-email-assistant</a></p><p><br></p><p>Find more use cases at <a href=\"https://docs.buildship.com/ai-models/assistant\" rel=\"noopener noreferrer\" target=\"_blank\">https://docs.buildship.com/ai-models/assistant</a></p>"
+}
