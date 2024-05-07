@@ -3,7 +3,6 @@ import { snakeCase } from "lodash";
 import fs from "fs";
 import path from "path";
 import { v4 as uuidv4 } from 'uuid';
-import { ChatCompletion } from 'groq-sdk/resources/chat';
 
 const getChatHistory = (threadId: string, logging: any) => {
   // Load previous messages if the file exists
@@ -85,7 +84,7 @@ export default async function assistant(
   * Retrieve the conversation from the threadId if it exists, otherwise generate a new threadId
   **/
   threadId ||= uuidv4();
-  const chatHistory = getChatHistory(threadId, logging) as ChatCompletion.Choice.Message[];
+  const chatHistory = getChatHistory(threadId, logging) as Groq.Chat.ChatCompletion.Choice.Message[];
 
   const initialMessages: Groq.Chat.CompletionCreateParams.Message[] = [
     {
