@@ -1,4 +1,5 @@
 import Groq from 'groq-sdk';
+import { snakeCase } from "lodash";
 
 type Tool = Groq.Chat.CompletionCreateParams.Tool;
 
@@ -6,7 +7,7 @@ const nodeToGroqTool: (node: Node) => Tool = (node) => {
   return {
     type: "function",
     function: {
-      name: node.id,
+      name: snakeCase(node.label || node.meta.name),
       description: node.meta.description ?? "",
       parameters: {
         type: "object",
@@ -92,15 +93,15 @@ export default async function assistant(
           logging.log("Tool calls: ", toolCalls);
 
           for (const toolCall of toolCalls) {
-            const tool = tools.find(tool => tool.function?.name === toolCall.function?.name);
-            const node = nodes?.find((node: Node) => node.id === toolCall.function?.name);
-            if (!tool || !node) {
+            const node: Node = nodes?.find((node: Node) =>
+              snakeCase(node.label || node.meta.name) === toolCall.function?.name);
+            if (!node) {
               logging.log("Failed to find tool:");
               logging.log(toolCall);
               logging.log(node);
               throw new Error("Failed to find tool");
             }
-            logging.log("Tool node: ", node.label);
+            logging.log(`Tool: ${node.label} `);
             let args = {} as Record<string, unknown>;
             try {
               args = JSON.parse(toolCall.function?.arguments ?? "{}");
