@@ -28,7 +28,7 @@ const execute = async (name: string, input: Record<string, any>) => {
   }
   if (name.includes("Log Message to Console")) {
     console.log(input.message);
-    return "";
+    return "Message logged successfully";
   }
   return `Unknown tool: ${name}`;
 };
