@@ -92,7 +92,7 @@ export default async function assistant(
       "content": systemPrompt
     },
     // append the chat history to the initial messages excluding the system messages
-    ...(chatHistory.filter(m => m.role === "system") ?? []),
+    ...(chatHistory.filter(m => m.role !== "system") ?? []),
     {
       "role": "user",
       "content": userPrompt,
@@ -179,11 +179,12 @@ export default async function assistant(
       requestCount++;
     } while (!isEndTurn(finish_reasons));
 
-    let newChatHistory = [...request.messages, ...(response.choices || [])]
+    let newChatHistory = [...request.messages, ...(response.choices.map(c => c.message) || [])]
     appendChatHistory(threadId, newChatHistory);
     return {
-      response: response.choices[0]?.message?.content || "No Response",
-      threadId: null
+      message: response.choices[0]?.message?.content || "No Response",
+      threadId,
+      data: response
     }
   } catch (error) {
     logging.log("Error:");
